@@ -1,2 +1,8 @@
 # medical-exam-system
 醫事檢驗師考試練習系統
+ 
+## 🚀 部署狀態 
+ 
+- 最後更新: 週四 2025/05/29  9:37:04.42 
+- 狀態: 重新部署中... 
+- 網址: [https://ctmt88.github.io/medical-exam-system/](https://ctmt88.github.io/medical-exam-system/) 
