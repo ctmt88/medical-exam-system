@@ -1,0 +1,12 @@
+{ 
+  "name": "medical-exam-system", 
+  "version": "1.0.0", 
+  "description": "醫事檢驗師考試練習系統", 
+  "scripts": { 
+    "build": "cd frontend && npm install && npm run build", 
+    "dev": "cd frontend && npm run dev" 
+  }, 
+  "keywords": ["medical", "exam", "system"], 
+  "author": "ctmt88", 
+  "license": "MIT" 
+} 
