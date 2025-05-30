@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import ExcelImport from './ExcelImport'
 
 // API服務類
 class ApiService {
@@ -91,7 +92,7 @@ class ApiService {
         this.fallbackMode = true
         return {
           success: true,
-          user: { id: 1, username: 'DEMO001', name: '展示用戶' },
+          user: { id: 1, username: 'DEMO001', name: '展示用戶', role: 'admin' },
           message: '離線模式登入成功'
         }
       }
@@ -180,6 +181,23 @@ class ApiService {
       }
     }
   }
+
+  async importQuestions(questionsData) {
+    try {
+      if (this.fallbackMode) throw new Error('離線模式不支援題目匯入')
+      
+      return await this.request({
+        action: 'import_questions',
+        questions_data: JSON.stringify(questionsData)
+      })
+    } catch (error) {
+      console.error('題目匯入失敗:', error)
+      return {
+        success: false,
+        message: '離線模式不支援題目匯入功能'
+      }
+    }
+  }
 }
 
 const apiService = new ApiService()
@@ -203,6 +221,7 @@ function App() {
   const [examQuestions, setExamQuestions] = useState([])
   const [examHistory, setExamHistory] = useState([])
   const [connectionStatus, setConnectionStatus] = useState('checking')
+  const [showExcelImport, setShowExcelImport] = useState(false)
 
   useEffect(() => {
     checkConnectionAndLoadData()
@@ -598,7 +617,17 @@ function App() {
           </div>
 
           <div className="bg-white rounded-lg shadow p-6 mb-8">
-            <h2 className="text-lg font-semibold text-gray-900 mb-6">選擇考試科目</h2>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-lg font-semibold text-gray-900">選擇考試科目</h2>
+              {currentUser?.role === 'admin' && connectionStatus === 'online' && (
+                <button
+                  onClick={() => setShowExcelImport(true)}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm flex items-center gap-2"
+                >
+                  📊 Excel匯入題目
+                </button>
+              )}
+            </div>
             {loading ? (
               <div className="text-center py-8">
                 <div className="text-gray-600">載入中...</div>
@@ -871,6 +900,13 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+      
+      {showExcelImport && (
+        <ExcelImport
+          apiService={apiService}
+          onClose={() => setShowExcelImport(false)}
+        />
       )}
     </div>
   )
