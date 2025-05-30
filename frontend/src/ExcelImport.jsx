@@ -8,6 +8,7 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
   const [validationErrors, setValidationErrors] = useState([])
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadResults, setUploadResults] = useState(null)
+  const [debugInfo, setDebugInfo] = useState(null) // 新增調試資訊
 
   const expectedColumns = [
     '題號', '年份', '學期', '科目', '主題分類', '題目內容',
@@ -21,6 +22,20 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
     '微生物學與臨床微生物學': 4,
     '生物化學與臨床生化學': 5,
     '臨床血清免疫學與臨床病毒學': 6
+  }
+
+  // 新增：民國年轉西元年函數
+  const convertYear = (year) => {
+    const yearNum = parseInt(year)
+    if (yearNum < 200) { // 假設小於200的是民國年
+      return yearNum + 1911
+    }
+    return yearNum
+  }
+
+  // 新增：清理欄位名稱（移除空格、特殊字符）
+  const cleanColumnName = (name) => {
+    return name?.toString().trim().replace(/[\s\u00A0]/g, '') || ''
   }
 
   const handleFileSelect = (event) => {
@@ -48,13 +63,31 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
           return
         }
 
-        // 驗證欄位
+        // 調試：檢查實際的欄位名稱
         const firstRow = jsonData[0]
         const actualColumns = Object.keys(firstRow)
-        const missingColumns = expectedColumns.filter(col => !actualColumns.includes(col))
+        const cleanedActualColumns = actualColumns.map(cleanColumnName)
+        
+        // 設置調試資訊
+        setDebugInfo({
+          actualColumns: actualColumns,
+          cleanedColumns: cleanedActualColumns,
+          expectedColumns: expectedColumns,
+          firstRowData: firstRow
+        })
+
+        console.log('實際欄位:', actualColumns)
+        console.log('清理後欄位:', cleanedActualColumns)
+        console.log('期望欄位:', expectedColumns)
+
+        // 改進的欄位驗證 - 使用清理後的欄位名稱
+        const missingColumns = expectedColumns.filter(expectedCol => {
+          const cleanExpected = cleanColumnName(expectedCol)
+          return !cleanedActualColumns.includes(cleanExpected)
+        })
         
         if (missingColumns.length > 0) {
-          alert(`缺少必要欄位: ${missingColumns.join(', ')}`)
+          alert(`缺少必要欄位: ${missingColumns.join(', ')}\n\n實際欄位: ${actualColumns.join(', ')}`)
           return
         }
 
@@ -64,7 +97,7 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
         
       } catch (error) {
         console.error('解析Excel失敗:', error)
-        alert('Excel檔案格式錯誤')
+        alert('Excel檔案格式錯誤: ' + error.message)
       }
     }
     reader.readAsArrayBuffer(file)
@@ -76,45 +109,82 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
 
     data.forEach((row, index) => {
       const rowNumber = index + 2 // Excel從第2行開始(第1行是標題)
-      const processedRow = {}
       
-      // 驗證必要欄位
-      if (!row['題號'] || !row['科目'] || !row['題目內容']) {
-        errors.push(`第${rowNumber}行：缺少必要欄位`)
-        return
+      try {
+        // 改進的資料提取 - 處理可能的欄位名稱變化
+        const getFieldValue = (fieldName) => {
+          // 直接匹配
+          if (row[fieldName] !== undefined) return row[fieldName]
+          
+          // 清理後匹配
+          const cleanField = cleanColumnName(fieldName)
+          for (const key of Object.keys(row)) {
+            if (cleanColumnName(key) === cleanField) {
+              return row[key]
+            }
+          }
+          return undefined
+        }
+
+        const questionNumber = getFieldValue('題號')
+        const year = getFieldValue('年份')
+        const semester = getFieldValue('學期')
+        const subject = getFieldValue('科目')
+        const subCategory = getFieldValue('主題分類')
+        const question = getFieldValue('題目內容')
+        const optionA = getFieldValue('選項A')
+        const optionB = getFieldValue('選項B')
+        const optionC = getFieldValue('選項C')
+        const optionD = getFieldValue('選項D')
+        const correctAnswer = getFieldValue('正確答案')
+        const explanation = getFieldValue('詳解')
+
+        // 驗證必要欄位
+        if (!questionNumber || !subject || !question) {
+          errors.push(`第${rowNumber}行：缺少必要欄位 (題號: ${questionNumber}, 科目: ${subject}, 題目: ${question ? '有' : '無'})`)
+          return
+        }
+
+        // 改進的科目驗證 - 清理科目名稱
+        const cleanSubject = subject?.toString().trim()
+        if (!subjectMapping[cleanSubject]) {
+          errors.push(`第${rowNumber}行：科目「${cleanSubject}」不存在。可用科目: ${Object.keys(subjectMapping).join(', ')}`)
+          return
+        }
+
+        // 改進的正確答案驗證 - 處理可能的大小寫和空格
+        const cleanAnswer = correctAnswer?.toString().trim().toUpperCase()
+        if (!['A', 'B', 'C', 'D'].includes(cleanAnswer)) {
+          errors.push(`第${rowNumber}行：正確答案「${correctAnswer}」必須是 A、B、C、D 其中之一`)
+          return
+        }
+
+        // 處理資料
+        const processedRow = {
+          questionNumber: parseInt(questionNumber),
+          year: convertYear(year || new Date().getFullYear()), // 使用轉換函數
+          semester: parseInt(semester) || 1,
+          categoryId: subjectMapping[cleanSubject],
+          subCategory: subCategory?.toString().trim() || '',
+          question: question?.toString().trim() || '',
+          optionA: optionA?.toString().trim() || '',
+          optionB: optionB?.toString().trim() || '',
+          optionC: optionC?.toString().trim() || '',
+          optionD: optionD?.toString().trim() || '',
+          correctAnswer: cleanAnswer,
+          explanation: explanation?.toString().trim() || '',
+          originalRow: rowNumber
+        }
+
+        processedData.push(processedRow)
+        
+      } catch (error) {
+        errors.push(`第${rowNumber}行：處理錯誤 - ${error.message}`)
       }
-
-      // 驗證科目
-      if (!subjectMapping[row['科目']]) {
-        errors.push(`第${rowNumber}行：科目「${row['科目']}」不存在`)
-        return
-      }
-
-      // 驗證正確答案
-      if (!['A', 'B', 'C', 'D'].includes(row['正確答案'])) {
-        errors.push(`第${rowNumber}行：正確答案必須是 A、B、C、D 其中之一`)
-        return
-      }
-
-      // 處理資料
-      processedRow.questionNumber = parseInt(row['題號'])
-      processedRow.year = parseInt(row['年份']) || new Date().getFullYear()
-      processedRow.semester = parseInt(row['學期']) || 1
-      processedRow.categoryId = subjectMapping[row['科目']]
-      processedRow.subCategory = row['主題分類'] || ''
-      processedRow.question = row['題目內容'].trim()
-      processedRow.optionA = row['選項A']?.trim() || ''
-      processedRow.optionB = row['選項B']?.trim() || ''
-      processedRow.optionC = row['選項C']?.trim() || ''
-      processedRow.optionD = row['選項D']?.trim() || ''
-      processedRow.correctAnswer = row['正確答案'].trim().toUpperCase()
-      processedRow.explanation = row['詳解']?.trim() || ''
-      processedRow.originalRow = rowNumber
-
-      processedData.push(processedRow)
     })
 
     setValidationErrors(errors)
+    console.log('處理後的資料:', processedData)
     return processedData
   }
 
@@ -128,13 +198,14 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
     setUploadProgress(0)
     
     try {
-      const allData = validateAndProcessData(
-        XLSX.utils.sheet_to_json(
-          XLSX.read(await file.arrayBuffer(), { type: 'array' }).Sheets[
-            XLSX.read(await file.arrayBuffer(), { type: 'array' }).SheetNames[0]
-          ]
-        )
+      // 重新處理所有資料
+      const rawData = XLSX.utils.sheet_to_json(
+        XLSX.read(await file.arrayBuffer(), { type: 'array' }).Sheets[
+          XLSX.read(await file.arrayBuffer(), { type: 'array' }).SheetNames[0]
+        ]
       )
+      
+      const allData = validateAndProcessData(rawData)
 
       console.log('準備上傳的資料:', allData)
 
@@ -167,7 +238,6 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
         await new Promise(resolve => setTimeout(resolve, 500))
       }
 
-      // 修正：正確設置上傳結果
       setUploadResults({
         total: allData.length,
         success: successCount,
@@ -175,9 +245,8 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
         errors: errors
       })
 
-      // 修正：在設置結果後調用成功回調
       if (onSuccess && successCount > 0) {
-        onSuccess() // 調用父組件的成功回調
+        onSuccess()
       }
 
     } catch (error) {
@@ -221,7 +290,7 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
                   點擊選擇Excel檔案
                 </div>
                 <div className="text-sm text-gray-500">
-                  支援 .xlsx 和 .xls 格式
+                  支援 .xlsx 和 .xls 格式，自動處理民國年轉換
                 </div>
               </label>
             </div>
@@ -233,12 +302,29 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
             )}
           </div>
 
+          {/* 調試資訊顯示 */}
+          {debugInfo && (
+            <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <h3 className="font-semibold text-yellow-900 mb-2">🔍 檔案分析結果：</h3>
+              <div className="text-sm text-yellow-800">
+                <p><strong>實際欄位:</strong> {debugInfo.actualColumns.join(', ')}</p>
+                <p><strong>期望欄位:</strong> {debugInfo.expectedColumns.join(', ')}</p>
+                <p><strong>第一行資料範例:</strong></p>
+                <div className="bg-yellow-100 p-2 rounded mt-1 font-mono text-xs">
+                  {JSON.stringify(debugInfo.firstRowData, null, 2)}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Excel格式說明 */}
           <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <h3 className="font-semibold text-blue-900 mb-2">Excel格式要求：</h3>
+            <h3 className="font-semibold text-blue-900 mb-2">✅ 系統支援格式：</h3>
             <div className="text-sm text-blue-800">
-              <p className="mb-2">必須包含以下欄位（請確保欄位名稱完全相符）：</p>
-              <div className="grid grid-cols-2 gap-2">
+              <p className="mb-2">✅ 支援民國年自動轉換（如104年→2015年）</p>
+              <p className="mb-2">✅ 支援主題分類前綴（如"A. 基礎免疫學"）</p>
+              <p className="mb-2">✅ 支援選項中的特殊字符和數字</p>
+              <div className="grid grid-cols-2 gap-2 mt-2">
                 {expectedColumns.map(col => (
                   <span key={col} className="bg-blue-100 px-2 py-1 rounded text-xs">
                     {col}
@@ -246,8 +332,8 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
                 ))}
               </div>
               <p className="mt-2 text-xs">
-                • 正確答案必須是 A、B、C、D 其中之一<br/>
-                • 科目必須是系統中已存在的科目名稱<br/>
+                • 正確答案支援 A、B、C、D（自動處理大小寫）<br/>
+                • 科目名稱：{Object.keys(subjectMapping).join('、')}<br/>
                 • 第一行必須是標題行，資料從第二行開始
               </p>
             </div>
@@ -257,7 +343,7 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
           {validationErrors.length > 0 && (
             <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
               <h3 className="font-semibold text-red-900 mb-2">
-                發現 {validationErrors.length} 個錯誤：
+                ❌ 發現 {validationErrors.length} 個錯誤：
               </h3>
               <div className="max-h-32 overflow-y-auto">
                 {validationErrors.map((error, index) => (
@@ -273,13 +359,14 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
           {preview.length > 0 && (
             <div className="mb-6">
               <h3 className="font-semibold text-gray-900 mb-3">
-                資料預覽 (前10筆)：
+                📋 資料預覽 (前10筆)：
               </h3>
               <div className="overflow-x-auto">
                 <table className="min-w-full bg-white border border-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">題號</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">年份</th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">科目</th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">題目</th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">答案</th>
@@ -289,6 +376,7 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
                     {preview.map((row, index) => (
                       <tr key={index} className="border-b border-gray-200">
                         <td className="px-3 py-2 text-sm">{row.questionNumber}</td>
+                        <td className="px-3 py-2 text-sm">{row.year}</td>
                         <td className="px-3 py-2 text-sm">
                           {Object.keys(subjectMapping).find(key => subjectMapping[key] === row.categoryId)}
                         </td>
@@ -323,7 +411,7 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
           {/* 上傳結果 */}
           {uploadResults && (
             <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
-              <h3 className="font-semibold text-green-900 mb-2">上傳完成！</h3>
+              <h3 className="font-semibold text-green-900 mb-2">🎉 上傳完成！</h3>
               <div className="text-sm text-green-800">
                 <p>總計: {uploadResults.total} 題</p>
                 <p>成功: {uploadResults.success} 題</p>
