@@ -1,0 +1,3 @@
+@echo off 
+chcp 65001 >nul 
+echo 建立Dashboard和其他頁面... 
