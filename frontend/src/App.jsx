@@ -1,278 +1,375 @@
-// src/services/apiService.js - 整合真實 bigcloud API
-class RealApiService {
-  constructor() {
-    // 你的 bigcloud API 基礎網址
-    this.baseURL = 'https://starsport.tw/exam/api';
-    this.token = localStorage.getItem('auth_token');
-    
-    // 初始化時顯示連接資訊
-    console.log('🌐 API Service initialized:', this.baseURL);
-  }
-
-  // 通用請求方法 - 使用參數方式
-  async request(route = '', options = {}) {
-    const url = route ? `${this.baseURL}/?route=${route}` : this.baseURL;
-    const config = {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-      },
-      ...options
-    };
-
-    // 添加認證 token
-    if (this.token) {
-      config.headers.Authorization = `Bearer ${this.token}`;
-    }
-
-    try {
-      console.log(`🚀 API Request: ${config.method || 'GET'} ${url}`);
-      const response = await fetch(url, config);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      console.log(`✅ API Response:`, data);
-
-      if (!data.success) {
-        throw new Error(data.error?.message || '請求失敗');
-      }
-
-      return data;
-    } catch (error) {
-      console.error(`❌ API Error:`, error);
-      
-      // 用戶友善的錯誤處理
-      if (error.message.includes('Failed to fetch')) {
-        throw new Error('網路連線失敗，請檢查網路連接');
-      }
-      if (error.message.includes('CORS')) {
-        throw new Error('跨域請求失敗，請聲告系統管理員');
-      }
-      
-      throw error;
-    }
-  }
-
-  // 測試 API 連線
-  async testConnection() {
-    try {
-      const response = await this.request('test');
-      return {
-        success: true,
-        message: 'API 連線成功',
-        data: response.data
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: 'API 連線失敗',
-        error: error.message
-      };
-    }
-  }
-
-  // 使用者登入
-  async login(studentId, password) {
-    try {
-      const response = await this.request('login', {
-        method: 'POST',
-        body: JSON.stringify({
-          student_id: studentId,
-          password: password
-        })
-      });
-
-      // 儲存 token 和使用者資料
-      if (response.data.token) {
-        this.token = response.data.token;
-        localStorage.setItem('auth_token', this.token);
-        localStorage.setItem('user_data', JSON.stringify(response.data.user));
-        console.log('✅ 登入成功，token 已儲存');
-      }
-
-      return {
-        success: true,
-        message: '登入成功',
-        user: response.data.user,
-        token: response.data.token
-      };
-    } catch (error) {
-      throw new Error(error.message || '登入失敗');
-    }
-  }
-
-  // 登出
-  logout() {
-    this.token = null;
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('user_data');
-    console.log('📤 已登出，清除本地資料');
-    
-    return {
-      success: true,
-      message: '已登出'
-    };
-  }
-
-  // 取得考試科目
-  async getCategories() {
-    try {
-      const response = await this.request('categories');
-      
-      return {
-        success: true,
-        categories: response.data.categories || [],
-        message: `取得 ${response.data.categories?.length || 0} 個科目`
-      };
-    } catch (error) {
-      throw new Error('取得科目失敗: ' + error.message);
-    }
-  }
-
-  // 開始考試
-  async startExam(categoryId) {
-    try {
-      if (!this.token) {
-        throw new Error('請先登入');
-      }
-
-      const response = await this.request('start-exam', {
-        method: 'POST',
-        body: JSON.stringify({
-          category_id: parseInt(categoryId)
-        })
-      });
-
-      return {
-        success: true,
-        sessionId: response.data.session_id,
-        categoryName: response.data.category?.category_name || '未知科目',
-        questions: response.data.questions || [],
-        timeLimit: 60, // 60 分鐘
-        totalQuestions: response.data.questions?.length || 0,
-        maxScore: 100,
-        scorePerQuestion: 1.25,
-        message: '考試開始成功'
-      };
-    } catch (error) {
-      throw new Error('開始考試失敗: ' + error.message);
-    }
-  }
-
-  // 儲存答案 (目前後端還沒實作，先回傳成功)
-  async saveAnswer(sessionId, questionId, answer, isMarked = false) {
-    try {
-      // 暫時儲存到本地，等後端實作完成
-      const key = `answer_${sessionId}_${questionId}`;
-      localStorage.setItem(key, JSON.stringify({
-        answer,
-        isMarked,
-        timestamp: Date.now()
-      }));
-      
-      console.log(`💾 答案已暫存: 題目${questionId} = ${answer}`);
-      
-      return {
-        success: true,
-        message: '答案已儲存'
-      };
-    } catch (error) {
-      throw new Error('儲存答案失敗: ' + error.message);
-    }
-  }
-
-  // 提交考試 (目前後端還沒實作，先回傳模擬結果)
-  async submitExam(sessionId, answers) {
-    try {
-      // 模擬計算成績 (等後端實作完成後修改)
-      const totalQuestions = Object.keys(answers).length;
-      const correctCount = Math.floor(Math.random() * totalQuestions * 0.3) + Math.floor(totalQuestions * 0.5);
-      const totalScore = correctCount * 1.25;
-      
-      console.log(`📊 模擬成績計算: ${correctCount}/${totalQuestions} 正確，${totalScore} 分`);
-      
-      return {
-        success: true,
-        totalScore: totalScore,
-        correctCount: correctCount,
-        totalQuestions: totalQuestions,
-        scorePerQuestion: 1.25,
-        message: '考試提交成功 (模擬結果)',
-        note: '此為前端模擬結果，實際成績請等待後端實作'
-      };
-    } catch (error) {
-      throw new Error('提交考試失敗: ' + error.message);
-    }
-  }
-
-  // 取得考試歷史 (暫時回傳空資料)
-  async getExamHistory() {
-    try {
-      return {
-        success: true,
-        exams: [],
-        message: '考試歷史功能開發中'
-      };
-    } catch (error) {
-      throw new Error('取得考試歷史失敗: ' + error.message);
-    }
-  }
-
-  // 取得使用者資料
-  getCurrentUser() {
-    const userData = localStorage.getItem('user_data');
-    return userData ? JSON.parse(userData) : null;
-  }
-
-  // 檢查登入狀態
-  isLoggedIn() {
-    return !!this.token && !!this.getCurrentUser();
-  }
-
-  // 取得本地儲存的答案 (用於考試恢復)
-  getLocalAnswers(sessionId) {
-    const answers = {};
-    const keys = Object.keys(localStorage).filter(key => key.startsWith(`answer_${sessionId}_`));
-    
-    keys.forEach(key => {
-      const questionId = key.split('_')[2];
-      const data = JSON.parse(localStorage.getItem(key));
-      answers[questionId] = data.answer;
-    });
-    
-    return answers;
-  }
-
-  // 清除本地答案快取
-  clearLocalAnswers(sessionId) {
-    const keys = Object.keys(localStorage).filter(key => key.startsWith(`answer_${sessionId}_`));
-    keys.forEach(key => localStorage.removeItem(key));
-    console.log(`🗑️ 已清除 ${keys.length} 個本地答案快取`);
-  }
-}
-
-// 建立全域實例
-const realApiService = new RealApiService();
-
-// 自動測試連線 (可選)
-realApiService.testConnection().then(result => {
-  if (result.success) {
-    console.log('🎉 API 自動連線測試成功');
-  } else {
-    console.warn('⚠️ API 自動連線測試失敗:', result.error);
-  }
-});
-
-// 匯出供其他模組使用
-export default realApiService;
-
-// 如果在瀏覽器環境，也可以掛載到 window
-if (typeof window !== 'undefined') {
-  window.realApiService = realApiService;
-}
-
-// 相容性匯出 (如果你的前端使用舊的模擬服務)
-export { realApiService as apiService };
+import React, { useState, useEffect } from 'react' 
+ 
+function App() { 
+  const [currentView, setCurrentView] = useState('home') 
+  const [isLoggedIn, setIsLoggedIn] = useState(false) 
+  const [showLoginModal, setShowLoginModal] = useState(false) 
+  const [selectedSubject, setSelectedSubject] = useState(null) 
+  const [examTimer, setExamTimer] = useState(3600) // 60分鐘 
+  const [currentQuestion, setCurrentQuestion] = useState(0) 
+  const [userAnswers, setUserAnswers] = useState({}) 
+  const [isExamActive, setIsExamActive] = useState(false) 
+ 
+  // 六大科目資料 
+  const subjects = [ 
+    { id: 1, name: '臨床生理學與病理學', shortName: '生理病理', questions: 80 }, 
+    { id: 2, name: '臨床血液學與血庫學', shortName: '血液血庫', questions: 80 }, 
+    { id: 3, name: '醫學分子檢驗學與臨床鏡檢學', shortName: '分子鏡檢', questions: 80 }, 
+    { id: 4, name: '微生物學與臨床微生物學', shortName: '微生物學', questions: 80 }, 
+    { id: 5, name: '生物化學與臨床生化學', shortName: '生物化學', questions: 80 }, 
+    { id: 6, name: '臨床血清免疫學與臨床病毒學', shortName: '血清免疫', questions: 80 } 
+  ] 
+ 
+  // 模擬考試題目 
+  const mockQuestions = Array.from({ length: 80 }, (_, i) => ({ 
+    id: i + 1, 
+    question: `第${i + 1}題：關於醫事檢驗的描述，下列何者正確？（這是模擬題目）`, 
+    options: { 
+      A: `選項A：這是第${i + 1}題的選項A，描述某個檢驗方法的特點。`, 
+      B: `選項B：這是第${i + 1}題的選項B，說明另一種檢驗技術。`, 
+      C: `選項C：這是第${i + 1}題的選項C，解釋相關的生理機制。`, 
+      D: `選項D：這是第${i + 1}題的選項D，描述臨床應用情況。` 
+    }, 
+    correctAnswer: ['A', 'B', 'C', 'D'][i % 4] 
+  }^) 
+ 
+  // 計時器效果 
+  useEffect(() => { 
+    let interval = null 
+      interval = setInterval(() => { 
+        setExamTimer(timer => timer - 1) 
+      }, 1000) 
+    } else if (examTimer === 0) { 
+      setIsExamActive(false) 
+      alert('時間到！考試結束'^) 
+      setCurrentView('result') 
+    } 
+    return () => clearInterval(interval) 
+  }, [isExamActive, examTimer]) 
+ 
+  // 格式化時間顯示 
+  const formatTime = (seconds) => { 
+    const hours = Math.floor(seconds / 3600) 
+    const minutes = Math.floor((seconds % 3600) / 60) 
+    const secs = seconds % 60 
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}` 
+  } 
+ 
+  // 處理登入 
+  const handleLogin = () => { 
+    setIsLoggedIn(true) 
+    setShowLoginModal(false) 
+    setCurrentView('dashboard') 
+  } 
+ 
+  // 開始考試 
+  const startExam = (subjectId) => { 
+    const subject = subjects.find(s => s.id === subjectId) 
+    setSelectedSubject(subject) 
+    setCurrentView('exam') 
+    setCurrentQuestion(0) 
+    setExamTimer(3600) 
+    setUserAnswers({}) 
+    setIsExamActive(true) 
+  } 
+ 
+  // 選擇答案 
+  const selectAnswer = (questionId, answer) => { 
+    setUserAnswers(prev => ({...prev, [questionId]: answer}^)) 
+  } 
+ 
+  // 登入模態框 
+  const LoginModal = () => ( 
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"> 
+      <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4"> 
+        <h3 className="text-lg font-semibold text-gray-800 mb-4">系統登入</h3> 
+        <div className="space-y-4"> 
+          <div> 
+            <label className="block text-sm font-medium text-gray-700 mb-1">學號</label> 
+            <input type="text" defaultValue="DEMO001" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" /> 
+          </div> 
+          <div> 
+            <label className="block text-sm font-medium text-gray-700 mb-1">密碼</label> 
+            <input type="password" defaultValue="demo123" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" /> 
+          </div> 
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3"> 
+            <p className="text-sm text-blue-800">展示帳號：學號 DEMO001，密碼 demo123</p> 
+          </div> 
+        </div> 
+        <div className="flex gap-3 mt-6"> 
+          <button onClick={() => setShowLoginModal(false)} className="flex-1 py-2 px-4 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">取消</button> 
+          <button onClick={handleLogin} className="flex-1 py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700">登入</button> 
+        </div> 
+      </div> 
+    </div> 
+  ) 
+ 
+  // 首頁視圖 
+  const HomePage = () => ( 
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100"> 
+      <nav className="bg-white shadow-sm"> 
+        <div className="max-w-7xl mx-auto px-4 py-4"> 
+          <div className="flex justify-between items-center"> 
+            <div className="flex items-center"> 
+              <h1 className="text-2xl font-bold text-gray-900">醫檢師考試系統</h1> 
+              <span className="ml-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">互動展示版</span> 
+            </div> 
+            <button onClick={() => setShowLoginModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">登入</button> 
+          </div> 
+        </div> 
+      </nav> 
+ 
+      <main className="max-w-7xl mx-auto py-12 px-4"> 
+        <div className="text-center mb-12"> 
+          <h2 className="text-4xl font-bold text-gray-900 mb-4">醫事檢驗師國家考試線上練習系統</h2> 
+          <p className="text-xl text-gray-600 mb-8">提供完整的六大科目練習，幫助您順利通過醫檢師考試</p> 
+          <button onClick={() => setShowLoginModal(true)} className="bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors">開始練習</button> 
+        </div> 
+ 
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8"> 
+          {subjects.map(subject => ( 
+            <div key={subject.id} className="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow"> 
+              <h3 className="text-lg font-bold text-gray-900 mb-2">{subject.name}</h3> 
+              <p className="text-gray-600 mb-4 text-sm">{subject.shortName}</p> 
+              <div className="flex justify-between items-center"> 
+                <span className="text-sm text-blue-600 font-semibold">{subject.questions}題 • 60分鐘</span> 
+                <button onClick={() => setShowLoginModal(true)} className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm">開始練習</button> 
+              </div> 
+            </div> 
+          ))} 
+        </div> 
+      </main> 
+    </div> 
+  ) 
+ 
+  // 學生儀表板視圖  
+  const Dashboard = () => (  
+    <div className="min-h-screen bg-gray-50">  
+      <nav className="bg-white shadow-sm">  
+        <div className="max-w-7xl mx-auto px-4 py-4">  
+          <div className="flex justify-between items-center">  
+            <h1 className="text-xl font-bold text-gray-900">醫檢師考試系統</h1>  
+            <div className="flex items-center space-x-4">  
+              <span className="text-gray-700">歡迎，展示使用者</span>  
+              <button onClick={() => { setIsLoggedIn(false); setCurrentView('home') }} className="text-gray-500 hover:text-gray-700">登出</button>  
+            </div>  
+          </div>  
+        </div>  
+      </nav>  
+  
+      <div className="max-w-7xl mx-auto py-8 px-4">  
+        <div className="grid lg:grid-cols-4 gap-6 mb-8">  
+          <div className="bg-white rounded-lg shadow p-6">  
+            <h4 className="text-sm text-gray-600">最佳成績</h4>  
+            <p className="text-2xl font-bold text-yellow-600">95.0</p>  
+          </div>  
+          <div className="bg-white rounded-lg shadow p-6">  
+            <h4 className="text-sm text-gray-600">平均分數</h4>  
+            <p className="text-2xl font-bold text-blue-600">85.3</p>  
+          </div>  
+          <div className="bg-white rounded-lg shadow p-6">  
+            <h4 className="text-sm text-gray-600">考試次數</h4>  
+            <p className="text-2xl font-bold text-green-600">15</p>  
+          </div>  
+          <div className="bg-white rounded-lg shadow p-6">  
+            <h4 className="text-sm text-gray-600">學習狀態</h4>  
+            <p className="text-2xl font-bold text-purple-600">活躍</p>  
+          </div>  
+        </div>  
+  
+        <div className="bg-white rounded-lg shadow p-6">  
+          <h2 className="text-lg font-semibold text-gray-900 mb-6">選擇考試科目</h2>  
+          <div className="grid md:grid-cols-2 gap-4">  
+            {subjects.map(subject => (  
+              <div key={subject.id} className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors">  
+                <h3 className="font-semibold text-gray-900 mb-2">{subject.name}</h3>  
+                <p className="text-sm text-gray-600 mb-4">{subject.shortName}</p>  
+                <div className="flex justify-between items-center">  
+                  <span className="text-xs text-gray-500">{subject.questions}題 • 60分鐘 • 100分</span>  
+                  <button onClick={() => startExam(subject.id)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm">開始考試</button>  
+                </div>  
+              </div>  
+            ))}  
+          </div>  
+        </div>  
+      </div>  
+    </div>  
+  )  
+ 
+  // 考試介面視圖 
+  const ExamInterface = () => ( 
+    <div className="min-h-screen bg-gray-50"> 
+      <nav className="bg-white shadow-sm border-b"> 
+        <div className="max-w-7xl mx-auto px-4 py-3"> 
+          <div className="flex items-center justify-between"> 
+            <h1 className="text-xl font-semibold text-gray-800">{selectedSubject?.name}</h1> 
+            <div className="flex items-center gap-6"> 
+              <div className="flex items-center gap-2 text-gray-600"> 
+                <span>已答: {Object.keys(userAnswers).length}/80</span> 
+              </div> 
+              <div className="flex items-center gap-2"> 
+                <span className={`font-mono text-lg ${examTimer < 600 ? 'text-red-600 font-bold' : 'text-gray-700'}`}> 
+                  {formatTime(examTimer)} 
+                </span> 
+              </div> 
+              <button onClick={() => { setIsExamActive(false); setCurrentView('result') }} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">提交</button> 
+            </div> 
+          </div> 
+        </div> 
+      </nav> 
+ 
+      <div className="max-w-7xl mx-auto px-4 py-6"> 
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6"> 
+          {/* 題目導航面板 */} 
+          <div className="lg:col-span-1"> 
+            <div className="bg-white rounded-lg shadow-sm p-4"> 
+              <h3 className="font-semibold text-gray-800 mb-3">題目導航</h3> 
+              <div className="grid grid-cols-8 gap-1"> 
+                {mockQuestions.map((_, index) => { 
+                  const isAnswered = userAnswers[index + 1] 
+                  const isCurrent = index === currentQuestion 
+                  return ( 
+                    <button 
+                      key={index} 
+                      onClick={() => setCurrentQuestion(index)} 
+                      className={` 
+                        w-8 h-8 text-xs rounded border text-center transition-colors 
+                        ${isCurrent ? 'ring-2 ring-blue-500' : ''} 
+                        ${isAnswered ? 'bg-green-100 border-green-300 text-green-700' : 'bg-gray-100 border-gray-300 text-gray-700'} 
+                        hover:bg-blue-50 
+                      `} 
+                    > 
+                      {index + 1} 
+                    </button> 
+                  ) 
+                })} 
+              </div> 
+              <div className="mt-4 space-y-2 text-xs text-gray-600"> 
+                <div className="flex items-center gap-2"> 
+                  <div className="w-3 h-3 bg-green-100 border border-green-300 rounded"></div> 
+                  <span>已作答</span> 
+                </div> 
+                <div className="flex items-center gap-2"> 
+                  <div className="w-3 h-3 bg-gray-100 border border-gray-300 rounded"></div> 
+                  <span>未作答</span> 
+                </div> 
+              </div> 
+            </div> 
+          </div> 
+ 
+          {/* 題目內容區 */} 
+          <div className="lg:col-span-3"> 
+            <div className="bg-white rounded-lg shadow-sm p-6"> 
+              <div className="flex items-center justify-between mb-4"> 
+                <h2 className="text-lg font-semibold text-gray-800">第 {currentQuestion + 1} 題</h2> 
+              </div> 
+ 
+              <div className="mb-6"> 
+                <p className="text-gray-800 leading-relaxed mb-4"> 
+                  {mockQuestions[currentQuestion]?.question} 
+                </p> 
+              </div> 
+ 
+              <div className="space-y-3 mb-6"> 
+                  <button 
+                    key={key} 
+                    onClick={() => selectAnswer(currentQuestion + 1, key)} 
+                    className={` 
+                      w-full p-4 text-left rounded-lg border transition-colors 
+                      ${userAnswers[currentQuestion + 1] === key 
+                        ? 'bg-blue-100 border-blue-300 text-blue-800' 
+                        : 'bg-gray-50 border-gray-200 text-gray-800 hover:bg-gray-100'} 
+                    `} 
+                  > 
+                    <span className="font-semibold mr-3">({key})</span> 
+                    {value} 
+                  </button> 
+                ))} 
+              </div> 
+ 
+              <div className="flex items-center justify-between"> 
+                <button 
+                  onClick={() => setCurrentQuestion(Math.max(0, currentQuestion - 1))} 
+                  disabled={currentQuestion === 0} 
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed" 
+                > 
+                  上一題 
+                </button> 
+                <span className="text-gray-600">{currentQuestion + 1} / 80</span> 
+                <button 
+                  onClick={() => setCurrentQuestion(Math.min(79, currentQuestion + 1))} 
+                  disabled={currentQuestion === 79} 
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed" 
+                > 
+                  下一題 
+                </button> 
+              </div> 
+            </div> 
+          </div> 
+        </div> 
+      </div> 
+    </div> 
+  ) 
+ 
+  // 考試結果頁面 
+  const ResultPage = () => { 
+    const correctCount = Object.entries(userAnswers).filter(([questionId, answer]) => 
+      mockQuestions[parseInt(questionId) - 1]?.correctAnswer === answer 
+    ).length 
+    const score = (correctCount * 1.25).toFixed(1) 
+    const percentage = ((correctCount / 80) * 100).toFixed(1) 
+ 
+    return ( 
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center"> 
+        <div className="bg-white rounded-lg shadow-xl p-8 max-w-2xl w-full mx-4"> 
+          <div className="text-center mb-8"> 
+            <h2 className="text-3xl font-bold text-gray-900 mb-4">考試完成！</h2> 
+            <p className="text-xl text-gray-600">{selectedSubject?.name}</p> 
+          </div> 
+ 
+          <div className="grid grid-cols-2 gap-8 mb-8"> 
+            <div className="text-center"> 
+              <div className="text-4xl font-bold text-blue-600 mb-2">{score}</div> 
+              <div className="text-gray-600">總分 (滿分100)</div> 
+            </div> 
+            <div className="text-center"> 
+              <div className="text-4xl font-bold text-green-600 mb-2">{correctCount}/80</div> 
+              <div className="text-gray-600">答對題數</div> 
+            </div> 
+          </div> 
+ 
+          <div className="mb-8"> 
+            <div className="bg-gray-200 rounded-full h-4 mb-2"> 
+              <div className="bg-blue-600 h-4 rounded-full" style={{width: `${percentage}%`}}></div> 
+            </div> 
+            <div className="text-center text-gray-600">答對率: {percentage}%</div> 
+          </div> 
+ 
+          <div className="flex gap-4"> 
+            <button 
+              onClick={() => setCurrentView('dashboard')} 
+              className="flex-1 py-3 px-6 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold" 
+            > 
+              返回首頁 
+            </button> 
+            <button 
+              onClick={() => { 
+                setCurrentView('exam') 
+                setCurrentQuestion(0) 
+                setExamTimer(3600) 
+                setUserAnswers({}) 
+                setIsExamActive(true) 
+              }} 
+              className="flex-1 py-3 px-6 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold" 
+            > 
+              重新考試 
+            </button> 
+          </div> 
+        </div> 
+      </div> 
+    ) 
+  } 
+ 
+  // 主要渲染邏輯 
+  return ( 
+    <div> 
