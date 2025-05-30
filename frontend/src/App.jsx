@@ -221,7 +221,6 @@ function App() {
   const [examQuestions, setExamQuestions] = useState([])
   const [examHistory, setExamHistory] = useState([])
   const [connectionStatus, setConnectionStatus] = useState('checking')
-  // const [showExcelImport, setShowExcelImport] = useState(false) // 暫時註釋，稍後使用
 
   useEffect(() => {
     checkConnectionAndLoadData()
@@ -246,11 +245,9 @@ function App() {
       setLoading(true)
       setConnectionStatus('checking')
       
-      // 測試API連線
       const isConnected = await apiService.testConnection()
       setConnectionStatus(isConnected ? 'online' : 'offline')
       
-      // 載入科目資料
       const data = await apiService.getCategories()
       if (data.success) {
         setSubjects(data.data)
@@ -283,11 +280,9 @@ function App() {
         setIsLoggedIn(true)
         setShowLoginModal(false)
         
-        // 清除錯誤和選中的科目
         setError('')
         setSelectedSubject(null)
         
-        // 強制跳轉到dashboard
         setCurrentView('dashboard')
         
         await loadExamHistory(data.user.id)
@@ -419,9 +414,8 @@ function App() {
     }
   }
 
-  // 主要渲染邏輯
-  // 渲染首頁
-  function renderHomePage() {
+  // 根據currentView決定渲染哪個頁面
+  if (currentView === 'home') {
     const statusDisplay = getConnectionStatusDisplay()
     
     return (
@@ -448,7 +442,6 @@ function App() {
                 ) : (
                   <div className="flex items-center space-x-2">
                     <button onClick={() => setShowLoginModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">登入系統</button>
-                    {/* 調試按鈕 */}
                     <button 
                       onClick={() => {
                         console.log('調試狀態:', { currentView, isLoggedIn, currentUser })
@@ -595,12 +588,22 @@ function App() {
             </div>
           </div>
         )}
+
+        {loading && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6">
+              <div className="flex items-center space-x-3">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                <span>處理中...</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
 
-  // 渲染儀表板
-  function renderDashboard() {
+  if (currentView === 'dashboard') {
     const bestScore = examHistory.length > 0 ? Math.max(...examHistory.map(h => h.score)) : 0
     const avgScore = examHistory.length > 0 ? (examHistory.reduce((sum, h) => sum + h.score, 0) / examHistory.length).toFixed(1) : 0
     const statusDisplay = getConnectionStatusDisplay()
@@ -657,15 +660,6 @@ function App() {
           <div className="bg-white rounded-lg shadow p-6 mb-8">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-lg font-semibold text-gray-900">選擇考試科目</h2>
-              {/* Excel匯入功能 - 需要先建立 ExcelImport.jsx 檔案 */}
-              {currentUser?.role === 'admin' && connectionStatus === 'online' && false && (
-                <button
-                  onClick={() => alert('Excel匯入功能開發中，請稍後再試')}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm flex items-center gap-2"
-                >
-                  📊 Excel匯入題目
-                </button>
-              )}
             </div>
             {loading ? (
               <div className="text-center py-8">
@@ -714,10 +708,8 @@ function App() {
       </div>
     )
   }
-}
 
-  // 渲染考試頁面
-  function renderExam() {
+  if (currentView === 'exam') {
     const currentQ = examQuestions[currentQuestion]
     if (!currentQ) return <div className="min-h-screen flex items-center justify-center"><div className="text-gray-600">載入中...</div></div>
 
@@ -844,8 +836,7 @@ function App() {
     )
   }
 
-  // 渲染結果頁面
-  function renderResult() {
+  if (currentView === 'result') {
     const correctCount = Object.entries(userAnswers).filter(([questionId, answer]) => {
       const question = examQuestions.find(q => q.id === parseInt(questionId))
       return question && question.correct_answer === answer
@@ -931,51 +922,17 @@ function App() {
     )
   }
 
+  // 默認返回首頁
   return (
     <div>
-      {/* 全域載入指示器 */}
-      {loading && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6">
-            <div className="flex items-center space-x-3">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-              <span>處理中...</span>
-            </div>
-          </div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">系統載入中...</h1>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
         </div>
-      )}
-      
-      {/* 根據currentView渲染對應頁面 */}
-      {(() => {
-        console.log('當前視圖:', currentView, '是否登入:', isLoggedIn)
-        
-        switch(currentView) {
-          case 'home':
-            return renderHomePage()
-          case 'dashboard':
-            return isLoggedIn ? renderDashboard() : renderHomePage()
-          case 'exam':
-            return isLoggedIn ? renderExam() : renderHomePage()
-          case 'result':
-            return isLoggedIn ? renderResult() : renderHomePage()
-          default:
-            return renderHomePage()
-        }
-      })()}
-      
-      {/* Excel匯入功能 - 需要先建立 ExcelImport.jsx 檔案
-      {showExcelImport && (
-        <ExcelImport
-          apiService={apiService}
-          onClose={() => setShowExcelImport(false)}
-        />
-      )}
-      */}
+      </div>
     </div>
   )
-
-  // 渲染首頁
-  function renderHomePage() {
 }
 
 export default App
