@@ -1,12 +1,30 @@
 import React, { useState, useEffect } from 'react'
-import apiService from './services/apiService';
-
 
 // API服務類
 class ApiService {
   constructor() {
-    this.baseURL = 'http://starsport.tw/exam/api/'
+    this.baseURL = 'https://starsport.tw/exam/api/'
     this.fallbackMode = false
+    this.connectionTested = false
+  }
+
+  async testConnection() {
+    try {
+      const response = await fetch(this.baseURL + '?action=categories', {
+        method: 'GET',
+        mode: 'cors',
+        credentials: 'omit',
+        headers: {
+          'Accept': 'application/json',
+        }
+      })
+      this.connectionTested = true
+      return response.ok
+    } catch (error) {
+      console.error('API連線測試失敗:', error)
+      this.connectionTested = true
+      return false
+    }
   }
 
   async request(params, retries = 2) {
@@ -47,6 +65,10 @@ class ApiService {
       } catch (error) {
         console.error(`API請求失敗 (嘗試 ${i + 1}/${retries + 1}):`, error)
         if (i === retries) {
+          if (!this.fallbackMode) {
+            this.fallbackMode = true
+            console.log('切換到離線模式')
+          }
           throw new Error(`API連線失敗: ${error.message}`)
         }
         await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)))
@@ -83,6 +105,7 @@ class ApiService {
       return await this.request({ action: 'categories' })
     } catch (error) {
       console.log('使用預設科目資料')
+      this.fallbackMode = true
       return {
         success: true,
         data: [
@@ -106,6 +129,7 @@ class ApiService {
       })
     } catch (error) {
       console.log('使用模擬題目')
+      this.fallbackMode = true
       const mockQuestions = Array.from({ length: 20 }, (_, i) => ({
         id: i + 1,
         question: `第${i + 1}題：關於醫事檢驗的描述，下列何者正確？`,
@@ -181,7 +205,7 @@ function App() {
   const [connectionStatus, setConnectionStatus] = useState('checking')
 
   useEffect(() => {
-    loadCategories()
+    checkConnectionAndLoadData()
   }, [])
 
   useEffect(() => {
@@ -198,15 +222,23 @@ function App() {
     return () => clearInterval(interval)
   }, [isExamActive, examTimer])
 
-  const loadCategories = async () => {
+  const checkConnectionAndLoadData = async () => {
     try {
       setLoading(true)
+      setConnectionStatus('checking')
+      
+      // 測試API連線
+      const isConnected = await apiService.testConnection()
+      setConnectionStatus(isConnected ? 'online' : 'offline')
+      
+      // 載入科目資料
       const data = await apiService.getCategories()
       if (data.success) {
         setSubjects(data.data)
       }
     } catch (error) {
-      console.error('載入科目失敗:', error)
+      console.error('初始化失敗:', error)
+      setConnectionStatus('offline')
     } finally {
       setLoading(false)
     }
@@ -352,7 +384,22 @@ function App() {
     }
   }
 
+  const getConnectionStatusDisplay = () => {
+    switch (connectionStatus) {
+      case 'checking':
+        return { text: '檢測中...', color: 'bg-yellow-100 text-yellow-800' }
+      case 'online':
+        return { text: 'MySQL連線', color: 'bg-green-100 text-green-800' }
+      case 'offline':
+        return { text: '離線模式', color: 'bg-red-100 text-red-800' }
+      default:
+        return { text: '未知狀態', color: 'bg-gray-100 text-gray-800' }
+    }
+  }
+
   if (currentView === 'home') {
+    const statusDisplay = getConnectionStatusDisplay()
+    
     return (
       <div>
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
@@ -361,9 +408,12 @@ function App() {
               <div className="flex justify-between items-center">
                 <div className="flex items-center">
                   <h1 className="text-2xl font-bold text-gray-900">醫檢師考試系統</h1>
-                  <span className="ml-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
-                    {connectionStatus === 'online' ? 'MySQL版' : '離線模式'}
+                  <span className={`ml-2 px-2 py-1 text-xs rounded-full ${statusDisplay.color}`}>
+                    {statusDisplay.text}
                   </span>
+                  {connectionStatus === 'checking' && (
+                    <div className="ml-2 animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  )}
                 </div>
                 {isLoggedIn ? (
                   <div className="flex items-center space-x-4">
@@ -382,7 +432,9 @@ function App() {
             <div className="text-center mb-12">
               <h2 className="text-4xl font-bold text-gray-900 mb-4">醫事檢驗師國家考試線上練習系統</h2>
               <p className="text-xl text-gray-600 mb-8">
-                連接MySQL資料庫，提供真實考試體驗{connectionStatus === 'offline' && '（目前為離線模式）'}
+                {connectionStatus === 'online' ? '連接MySQL資料庫，提供真實考試體驗' : 
+                 connectionStatus === 'offline' ? '目前為離線模式，使用模擬題目' : 
+                 '正在連接資料庫...'}
               </p>
               <div className="flex justify-center space-x-4">
                 {isLoggedIn ? (
@@ -393,11 +445,11 @@ function App() {
               </div>
             </div>
 
-            {loading ? (
+            {loading && connectionStatus === 'checking' ? (
               <div className="text-center py-8">
                 <div className="inline-flex items-center space-x-3">
                   <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                  <span className="text-gray-600">載入中...</span>
+                  <span className="text-gray-600">正在連接MySQL資料庫...</span>
                 </div>
               </div>
             ) : (
@@ -407,7 +459,9 @@ function App() {
                     <h3 className="text-lg font-bold text-gray-900 mb-2">{subject.name}</h3>
                     <p className="text-gray-600 mb-4 text-sm">{subject.description}</p>
                     <div className="flex justify-between items-center">
-                      <span className="text-sm text-blue-600 font-semibold">題庫練習 • 60分鐘</span>
+                      <span className="text-sm text-blue-600 font-semibold">
+                        {connectionStatus === 'online' ? '題庫練習' : '模擬練習'} • 60分鐘
+                      </span>
                       <button
                         onClick={() => handleSubjectClick(subject.id)}
                         className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm"
@@ -424,9 +478,9 @@ function App() {
               <h2 className="text-2xl font-bold text-gray-900 mb-4">系統特色</h2>
               <div className="grid md:grid-cols-3 gap-8">
                 <div>
-                  <div className="text-4xl mb-2">👀</div>
-                  <h3 className="text-lg font-semibold mb-2">免登入瀏覽</h3>
-                  <p className="text-gray-600">可先瀏覽所有科目內容，決定後再登入考試</p>
+                  <div className="text-4xl mb-2">🔗</div>
+                  <h3 className="text-lg font-semibold mb-2">自動連線</h3>
+                  <p className="text-gray-600">自動嘗試連接MySQL，失敗時切換離線模式</p>
                 </div>
                 <div>
                   <div className="text-4xl mb-2">⏱️</div>
@@ -436,7 +490,7 @@ function App() {
                 <div>
                   <div className="text-4xl mb-2">📚</div>
                   <h3 className="text-lg font-semibold mb-2">完整題庫</h3>
-                  <p className="text-gray-600">六大科目，每科80題，涵蓋考試重點</p>
+                  <p className="text-gray-600">六大科目，涵蓋考試重點</p>
                 </div>
               </div>
             </div>
@@ -471,6 +525,9 @@ function App() {
                 </div>
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                   <p className="text-sm text-blue-800">展示帳號：學號 DEMO001，密碼 demo123</p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    目前狀態：{getConnectionStatusDisplay().text}
+                  </p>
                 </div>
               </div>
               <div className="flex gap-3 mt-6">
@@ -498,13 +555,19 @@ function App() {
   if (currentView === 'dashboard') {
     const bestScore = examHistory.length > 0 ? Math.max(...examHistory.map(h => h.score)) : 0
     const avgScore = examHistory.length > 0 ? (examHistory.reduce((sum, h) => sum + h.score, 0) / examHistory.length).toFixed(1) : 0
+    const statusDisplay = getConnectionStatusDisplay()
 
     return (
       <div className="min-h-screen bg-gray-50">
         <nav className="bg-white shadow-sm">
           <div className="max-w-7xl mx-auto px-4 py-4">
             <div className="flex justify-between items-center">
-              <h1 className="text-xl font-bold text-gray-900">醫檢師考試系統</h1>
+              <div className="flex items-center">
+                <h1 className="text-xl font-bold text-gray-900">醫檢師考試系統</h1>
+                <span className={`ml-2 px-2 py-1 text-xs rounded-full ${statusDisplay.color}`}>
+                  {statusDisplay.text}
+                </span>
+              </div>
               <div className="flex items-center space-x-4">
                 <span className="text-gray-700">歡迎，{currentUser?.username}</span>
                 <button onClick={() => setCurrentView('home')} className="text-blue-600 hover:text-blue-700">返回首頁</button>
@@ -547,7 +610,9 @@ function App() {
                     <h3 className="font-semibold text-gray-900 mb-2">{subject.name}</h3>
                     <p className="text-sm text-gray-600 mb-4">{subject.description}</p>
                     <div className="flex justify-between items-center">
-                      <span className="text-xs text-gray-500">題庫練習 • 60分鐘</span>
+                      <span className="text-xs text-gray-500">
+                        {connectionStatus === 'online' ? '題庫練習' : '模擬練習'} • 60分鐘
+                      </span>
                       <button onClick={() => startExam(subject.id)} disabled={loading} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50">開始考試</button>
                     </div>
                   </div>
@@ -725,7 +790,7 @@ function App() {
             <h2 className="text-3xl font-bold text-gray-900 mb-4">考試完成！</h2>
             <p className="text-xl text-gray-600">{selectedSubject?.name}</p>
             <p className="text-sm text-gray-500 mt-2">
-              {apiService.fallbackMode ? '離線模式 - 成績未儲存' : '成績已儲存到資料庫'}
+              {connectionStatus === 'online' ? '成績已儲存到MySQL資料庫' : '離線模式 - 成績未儲存'}
             </p>
           </div>
 
