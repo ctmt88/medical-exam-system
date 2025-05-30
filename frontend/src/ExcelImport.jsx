@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import * as XLSX from 'xlsx'
 
-const ExcelImport = ({ apiService, onClose }) => {
+const ExcelImport = ({ apiService, onClose, onSuccess }) => {
   const [file, setFile] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [preview, setPreview] = useState([])
@@ -167,15 +167,18 @@ const ExcelImport = ({ apiService, onClose }) => {
         await new Promise(resolve => setTimeout(resolve, 500))
       }
 
+      // 修正：正確設置上傳結果
       setUploadResults({
-		  if (props.onSuccess) {
-  props.onSuccess() // 調用父組件的成功回調
-}
         total: allData.length,
         success: successCount,
         error: errorCount,
         errors: errors
       })
+
+      // 修正：在設置結果後調用成功回調
+      if (onSuccess && successCount > 0) {
+        onSuccess() // 調用父組件的成功回調
+      }
 
     } catch (error) {
       console.error('上傳失敗:', error)
