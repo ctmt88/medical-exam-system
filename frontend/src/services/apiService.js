@@ -1,73 +1,54 @@
-class ApiService {
-  constructor() {
-    this.baseURL = 'https://starsport.tw/exam/api';
-  }
+// frontend/src/services/apiService.js
+const API_BASE = 'https://starsport.tw/exam/api';
 
-  async request(endpoint, data = {}, useGet = false) {
-    const config = {
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    };
-
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-
-    let url;
-    
-    if (useGet) {
-      url = `${this.baseURL}?action=${endpoint}`;
-      config.method = 'GET';
-    } else {
-      url = this.baseURL;
-      config.method = 'POST';
-      config.body = JSON.stringify({ action: endpoint, ...data });
-    }
-
-    try {
-      const response = await fetch(url, config);
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error?.message || '請求失敗');
-      }
-      return result;
-    } catch (error) {
-      throw error;
-    }
-  }
-
+const apiService = {
   async login(studentId, password) {
-    return this.request('login', {
-      student_id: studentId,
-      password: password
+    const response = await fetch(API_BASE, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'login',
+        student_id: studentId,
+        password: password
+      })
     });
-  }
+    
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error?.message || '登入失敗');
+    }
+    return data;
+  },
 
   async getCategories() {
-    return this.request('categories', {}, true);
-  }
+    const response = await fetch(`${API_BASE}?action=categories`);
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error?.message || '取得科目失敗');
+    }
+    return data;
+  },
 
   async startExam(categoryId) {
-    return this.request('start_exam', {
-      category_id: categoryId
+    const response = await fetch(API_BASE, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'start_exam',
+        category_id: categoryId
+      })
     });
+    
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error?.message || '開始考試失敗');
+    }
+    return data;
   }
+};
 
-  async saveAnswer(sessionId, questionId, answer) {
-    return this.request('save_answer', {
-      session_id: sessionId,
-      question_id: questionId,
-      answer: answer
-    });
-  }
-
-  async submitExam(sessionId) {
-    return this.request('submit_exam', {
-      session_id: sessionId
-    });
-  }
-}
-
-export default new ApiService();
+window.apiService = apiService;
