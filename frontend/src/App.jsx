@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react'
+import apiService from './services/apiService';
+
 
 // API服務類
 class ApiService {
@@ -217,37 +219,23 @@ function App() {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
 
-  const handleLogin = async () => {
-    try {
-      setLoading(true)
-      setError('')
-
-      console.log('嘗試登入:', loginData.username)
-      const data = await apiService.login(loginData.username, loginData.password)
-
-      if (data.success) {
-        setCurrentUser(data.user)
-        setIsLoggedIn(true)
-        setShowLoginModal(false)
-        if (selectedSubject) {
-          startExam(selectedSubject.id)
-        } else {
-          setCurrentView('dashboard')
-        }
-        await loadExamHistory(data.user.id)
-        if (data.message) {
-          console.log('登入訊息:', data.message)
-        }
-      } else {
-        setError(data.message || '登入失敗')
-      }
-    } catch (error) {
-      console.error('登入錯誤詳情:', error)
-      setError(`連線錯誤: ${error.message}`)
-    } finally {
-      setLoading(false)
-    }
+const handleLogin = async () => {
+  try {
+    const studentId = document.querySelector('input[type="text"]').value;
+    const password = document.querySelector('input[type="password"]').value;
+    
+    const response = await apiService.login(studentId, password);
+    
+    localStorage.setItem('auth_token', response.data.token);
+    localStorage.setItem('user_data', JSON.stringify(response.data.user));
+    
+    setIsLoggedIn(true);
+    setShowLoginModal(false);
+    setCurrentView('dashboard');
+  } catch (error) {
+    alert('登入失敗: ' + error.message);
   }
+};
 
   const loadExamHistory = async (userId) => {
     try {
