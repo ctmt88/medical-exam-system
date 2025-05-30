@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import ExcelImport from './ExcelImport' // 暫時註釋，稍後再加入
+// import ExcelImport from './ExcelImport' // 暫時註釋，稍後再加入
 
 // API服務類
 class ApiService {
@@ -221,7 +221,7 @@ function App() {
   const [examQuestions, setExamQuestions] = useState([])
   const [examHistory, setExamHistory] = useState([])
   const [connectionStatus, setConnectionStatus] = useState('checking')
-  const [showExcelImport, setShowExcelImport] = useState(false) // 暫時註釋，稍後使用
+  // const [showExcelImport, setShowExcelImport] = useState(false) // 暫時註釋，稍後使用
 
   useEffect(() => {
     checkConnectionAndLoadData()
@@ -282,11 +282,14 @@ function App() {
         setCurrentUser(data.user)
         setIsLoggedIn(true)
         setShowLoginModal(false)
-        if (selectedSubject) {
-          startExam(selectedSubject.id)
-        } else {
-          setCurrentView('dashboard')
-        }
+        
+        // 清除錯誤和選中的科目
+        setError('')
+        setSelectedSubject(null)
+        
+        // 強制跳轉到dashboard
+        setCurrentView('dashboard')
+        
         await loadExamHistory(data.user.id)
         if (data.message) {
           console.log('登入訊息:', data.message)
@@ -416,7 +419,9 @@ function App() {
     }
   }
 
-  if (currentView === 'home') {
+  // 主要渲染邏輯
+  // 渲染首頁
+  function renderHomePage() {
     const statusDisplay = getConnectionStatusDisplay()
     
     return (
@@ -441,7 +446,19 @@ function App() {
                     <button onClick={() => { setIsLoggedIn(false); setCurrentUser(null) }} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">登出</button>
                   </div>
                 ) : (
-                  <button onClick={() => setShowLoginModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">登入系統</button>
+                  <div className="flex items-center space-x-2">
+                    <button onClick={() => setShowLoginModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">登入系統</button>
+                    {/* 調試按鈕 */}
+                    <button 
+                      onClick={() => {
+                        console.log('調試狀態:', { currentView, isLoggedIn, currentUser })
+                        alert(`狀態: ${currentView}, 登入: ${isLoggedIn}, 用戶: ${currentUser?.username || '無'}`)
+                      }}
+                      className="px-2 py-1 bg-gray-200 text-gray-600 rounded text-xs hover:bg-gray-300"
+                    >
+                      🐛
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -457,7 +474,18 @@ function App() {
               </p>
               <div className="flex justify-center space-x-4">
                 {isLoggedIn ? (
-                  <button onClick={() => setCurrentView('dashboard')} className="bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-blue-700">進入考試系統</button>
+                  <>
+                    <button onClick={() => setCurrentView('dashboard')} className="bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-blue-700">進入考試系統</button>
+                    <button 
+                      onClick={() => {
+                        console.log('強制跳轉Dashboard')
+                        setCurrentView('dashboard')
+                      }}
+                      className="bg-green-600 text-white px-4 py-3 rounded-lg font-semibold hover:bg-green-700"
+                    >
+                      強制進入Dashboard
+                    </button>
+                  </>
                 ) : (
                   <button onClick={() => setShowLoginModal(true)} className="bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-blue-700">登入開始練習</button>
                 )}
@@ -571,7 +599,8 @@ function App() {
     )
   }
 
-  if (currentView === 'dashboard') {
+  // 渲染儀表板
+  function renderDashboard() {
     const bestScore = examHistory.length > 0 ? Math.max(...examHistory.map(h => h.score)) : 0
     const avgScore = examHistory.length > 0 ? (examHistory.reduce((sum, h) => sum + h.score, 0) / examHistory.length).toFixed(1) : 0
     const statusDisplay = getConnectionStatusDisplay()
@@ -590,6 +619,15 @@ function App() {
               <div className="flex items-center space-x-4">
                 <span className="text-gray-700">歡迎，{currentUser?.username}</span>
                 <button onClick={() => setCurrentView('home')} className="text-blue-600 hover:text-blue-700">返回首頁</button>
+                <button 
+                  onClick={() => {
+                    console.log('Dashboard狀態:', { currentView, isLoggedIn, currentUser, examHistory })
+                    alert(`Dashboard狀態正常 - 用戶: ${currentUser?.username}`)
+                  }}
+                  className="px-2 py-1 bg-gray-200 text-gray-600 rounded text-xs hover:bg-gray-300"
+                >
+                  🐛
+                </button>
                 <button onClick={() => { setIsLoggedIn(false); setCurrentUser(null); setCurrentView('home') }} className="text-gray-500 hover:text-gray-700">登出</button>
               </div>
             </div>
@@ -620,7 +658,7 @@ function App() {
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-lg font-semibold text-gray-900">選擇考試科目</h2>
               {/* Excel匯入功能 - 需要先建立 ExcelImport.jsx 檔案 */}
-              {currentUser?.role === 'admin' && connectionStatus === 'online' && (
+              {currentUser?.role === 'admin' && connectionStatus === 'online' && false && (
                 <button
                   onClick={() => alert('Excel匯入功能開發中，請稍後再試')}
                   className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm flex items-center gap-2"
@@ -676,8 +714,10 @@ function App() {
       </div>
     )
   }
+}
 
-  if (currentView === 'exam') {
+  // 渲染考試頁面
+  function renderExam() {
     const currentQ = examQuestions[currentQuestion]
     if (!currentQ) return <div className="min-h-screen flex items-center justify-center"><div className="text-gray-600">載入中...</div></div>
 
@@ -804,7 +844,8 @@ function App() {
     )
   }
 
-  if (currentView === 'result') {
+  // 渲染結果頁面
+  function renderResult() {
     const correctCount = Object.entries(userAnswers).filter(([questionId, answer]) => {
       const question = examQuestions.find(q => q.id === parseInt(questionId))
       return question && question.correct_answer === answer
@@ -892,6 +933,7 @@ function App() {
 
   return (
     <div>
+      {/* 全域載入指示器 */}
       {loading && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6">
@@ -903,6 +945,24 @@ function App() {
         </div>
       )}
       
+      {/* 根據currentView渲染對應頁面 */}
+      {(() => {
+        console.log('當前視圖:', currentView, '是否登入:', isLoggedIn)
+        
+        switch(currentView) {
+          case 'home':
+            return renderHomePage()
+          case 'dashboard':
+            return isLoggedIn ? renderDashboard() : renderHomePage()
+          case 'exam':
+            return isLoggedIn ? renderExam() : renderHomePage()
+          case 'result':
+            return isLoggedIn ? renderResult() : renderHomePage()
+          default:
+            return renderHomePage()
+        }
+      })()}
+      
       {/* Excel匯入功能 - 需要先建立 ExcelImport.jsx 檔案
       {showExcelImport && (
         <ExcelImport
@@ -913,6 +973,9 @@ function App() {
       */}
     </div>
   )
+
+  // 渲染首頁
+  function renderHomePage() {
 }
 
 export default App
