@@ -98,3 +98,8 @@
 - 最後更新: 週五 2025/05/30 21:32:23.99 
 - 狀態: 重新部署中... 
 - 網址: [https://ctmt88.github.io/medical-exam-system/](https://ctmt88.github.io/medical-exam-system/) 
+ 
+## 🚀 部署狀態 
+- 最後更新: 週五 2025/05/30 21:38:47.48 
+- 狀態: 重新部署中... 
+- 網址: [https://ctmt88.github.io/medical-exam-system/](https://ctmt88.github.io/medical-exam-system/) 
