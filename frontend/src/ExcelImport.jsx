@@ -168,6 +168,9 @@ const ExcelImport = ({ apiService, onClose }) => {
       }
 
       setUploadResults({
+		  if (props.onSuccess) {
+  props.onSuccess() // 調用父組件的成功回調
+}
         total: allData.length,
         success: successCount,
         error: errorCount,
