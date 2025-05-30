@@ -209,51 +209,42 @@ const ExcelImport = ({ apiService, onClose, onSuccess }) => {
 
       console.log('準備上傳的資料:', allData)
 
-      const batchSize = 10 // 每次上傳10題
-      let successCount = 0
-      let errorCount = 0
-      const errors = []
-
-      for (let i = 0; i < allData.length; i += batchSize) {
-        const batch = allData.slice(i, i + batchSize)
+      // 使用新的批量匯入API（POST方式更安全）
+      const result = await apiService.batchImportQuestions(allData, 50)
+      
+      // 模擬進度更新
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => Math.min(prev + 10, 90))
+      }, 200)
+      
+      // 等待實際結果
+      setTimeout(() => {
+        clearInterval(progressInterval)
+        setUploadProgress(100)
         
-        try {
-          const result = await apiService.importQuestions(batch)
-          
-          if (result.success) {
-            successCount += batch.length
-          } else {
-            errorCount += batch.length
-            errors.push(`批次 ${Math.floor(i/batchSize) + 1}: ${result.message}`)
-          }
-        } catch (error) {
-          errorCount += batch.length
-          errors.push(`批次 ${Math.floor(i/batchSize) + 1}: ${error.message}`)
+        setUploadResults({
+          total: result.data?.total || allData.length,
+          success: result.data?.success || 0,
+          error: result.data?.error || 0,
+          errors: result.data?.errors || []
+        })
+
+        if (onSuccess && result.success) {
+          onSuccess()
         }
-
-        // 更新進度
-        setUploadProgress(Math.round(((i + batchSize) / allData.length) * 100))
-        
-        // 避免請求過快
-        await new Promise(resolve => setTimeout(resolve, 500))
-      }
-
-      setUploadResults({
-        total: allData.length,
-        success: successCount,
-        error: errorCount,
-        errors: errors
-      })
-
-      if (onSuccess && successCount > 0) {
-        onSuccess()
-      }
+      }, 1000)
 
     } catch (error) {
       console.error('上傳失敗:', error)
       alert('上傳失敗：' + error.message)
+      setUploadResults({
+        total: 0,
+        success: 0,
+        error: 1,
+        errors: [error.message]
+      })
     } finally {
-      setUploading(false)
+      setTimeout(() => setUploading(false), 1500)
     }
   }
 

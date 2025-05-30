@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import ExcelImport from './ExcelImport' // 取消註釋
 
-// ApiService類保持不變...
+// 在 App.jsx 中，替換整個 ApiService 類
+
 class ApiService {
   constructor() {
     this.baseURL = 'https://starsport.tw/exam/api/'
@@ -11,16 +12,9 @@ class ApiService {
 
   async testConnection() {
     try {
-      const response = await fetch(this.baseURL + '?action=categories', {
-        method: 'GET',
-        mode: 'cors',
-        credentials: 'omit',
-        headers: {
-          'Accept': 'application/json',
-        }
-      })
+      const response = await this.postRequest('categories', {})
       this.connectionTested = true
-      return response.ok
+      return response.success || false
     } catch (error) {
       console.error('API連線測試失敗:', error)
       this.connectionTested = true
@@ -28,7 +22,67 @@ class ApiService {
     }
   }
 
+  // 統一的POST請求方法
+  async postRequest(action, data = {}, retries = 2) {
+    for (let i = 0; i <= retries; i++) {
+      try {
+        const requestData = {
+          action: action,
+          ...data
+        }
+
+        console.log(`=== POST請求 (嘗試 ${i + 1}/${retries + 1}) ===`)
+        console.log('URL:', this.baseURL)
+        console.log('Action:', action)
+        console.log('Data:', requestData)
+
+        const response = await fetch(this.baseURL, {
+          method: 'POST',
+          mode: 'cors',
+          credentials: 'omit',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache',
+          },
+          body: JSON.stringify(requestData)
+        })
+
+        console.log('HTTP狀態:', response.status, response.statusText)
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        }
+
+        const text = await response.text()
+        console.log('API回應文字:', text.substring(0, 200) + (text.length > 200 ? '...' : ''))
+
+        try {
+          const result = JSON.parse(text)
+          console.log('=== API回應成功 ===')
+          console.log('結果:', result)
+          return result
+        } catch (jsonError) {
+          throw new Error('API回應格式錯誤: ' + text.substring(0, 100))
+        }
+
+      } catch (error) {
+        console.error(`POST請求失敗 (嘗試 ${i + 1}/${retries + 1}):`, error)
+        if (i === retries) {
+          if (!this.fallbackMode) {
+            this.fallbackMode = true
+            console.log('切換到離線模式')
+          }
+          throw new Error(`API連線失敗: ${error.message}`)
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)))
+      }
+    }
+  }
+
+  // 舊版GET請求方法（僅作為後備）
   async request(params, retries = 2) {
+    console.warn('使用舊版GET請求，建議改用POST')
     for (let i = 0; i <= retries; i++) {
       try {
         const url = new URL(this.baseURL)
@@ -38,7 +92,7 @@ class ApiService {
           }
         })
 
-        console.log('API請求:', url.toString())
+        console.log('GET請求:', url.toString())
 
         const response = await fetch(url, {
           method: 'GET',
@@ -55,22 +109,12 @@ class ApiService {
         }
 
         const text = await response.text()
-        console.log('API回應:', text)
-
-        try {
-          return JSON.parse(text)
-        } catch (jsonError) {
-          throw new Error('API回應格式錯誤: ' + text.substring(0, 100))
-        }
+        return JSON.parse(text)
 
       } catch (error) {
-        console.error(`API請求失敗 (嘗試 ${i + 1}/${retries + 1}):`, error)
+        console.error(`GET請求失敗 (嘗試 ${i + 1}/${retries + 1}):`, error)
         if (i === retries) {
-          if (!this.fallbackMode) {
-            this.fallbackMode = true
-            console.log('切換到離線模式')
-          }
-          throw new Error(`API連線失敗: ${error.message}`)
+          throw error
         }
         await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)))
       }
@@ -79,8 +123,7 @@ class ApiService {
 
   async login(username, password) {
     try {
-      const result = await this.request({
-        action: 'login',
+      const result = await this.postRequest('login', {
         username: username.trim(),
         password: password.trim()
       })
@@ -92,7 +135,7 @@ class ApiService {
         this.fallbackMode = true
         return {
           success: true,
-          user: { id: 1, username: 'DEMO001', name: '展示用戶', role: 'admin' }, // 添加admin角色
+          user: { id: 1, username: 'DEMO001', name: '展示用戶', role: 'admin' },
           message: '離線模式登入成功'
         }
       }
@@ -103,7 +146,7 @@ class ApiService {
   async getCategories() {
     try {
       if (this.fallbackMode) throw new Error('使用離線模式')
-      return await this.request({ action: 'categories' })
+      return await this.postRequest('categories')
     } catch (error) {
       console.log('使用預設科目資料')
       this.fallbackMode = true
@@ -124,8 +167,7 @@ class ApiService {
   async getQuestions(categoryId) {
     try {
       if (this.fallbackMode) throw new Error('使用離線模式')
-      return await this.request({
-        action: 'questions',
+      return await this.postRequest('questions', {
         category_id: categoryId
       })
     } catch (error) {
@@ -147,11 +189,10 @@ class ApiService {
   async submitExam(examData) {
     try {
       if (this.fallbackMode) throw new Error('使用離線模式')
-      return await this.request({
-        action: 'submit',
+      return await this.postRequest('submit', {
         user_id: examData.userId,
         category_id: examData.categoryId,
-        answers: JSON.stringify(examData.answers),
+        answers: examData.answers, // 直接傳送對象，不需要JSON.stringify
         score: examData.score
       })
     } catch (error) {
@@ -166,8 +207,7 @@ class ApiService {
   async getExamHistory(userId) {
     try {
       if (this.fallbackMode) throw new Error('使用離線模式')
-      return await this.request({
-        action: 'history',
+      return await this.postRequest('history', {
         user_id: userId
       })
     } catch (error) {
@@ -184,22 +224,111 @@ class ApiService {
 
   async importQuestions(questionsData) {
     try {
-      if (this.fallbackMode) throw new Error('離線模式不支援題目匯入')
+      console.log('=== Excel題目匯入開始 ===')
+      console.log('題目數量:', questionsData.length)
+      console.log('第一筆資料:', questionsData[0])
       
-      return await this.request({
-        action: 'import_questions',
-        questions_data: JSON.stringify(questionsData)
+      if (this.fallbackMode) {
+        throw new Error('離線模式不支援題目匯入')
+      }
+
+      // 使用POST請求，數據量大也沒問題
+      const result = await this.postRequest('import_questions', {
+        questions_data: questionsData,
+        import_source: 'excel',
+        import_time: new Date().toISOString()
       })
+
+      console.log('=== 匯入結果 ===')
+      console.log('結果:', result)
+      
+      return result
     } catch (error) {
-      console.error('題目匯入失敗:', error)
+      console.error('=== 匯入錯誤 ===')
+      console.error('錯誤詳情:', error)
       return {
         success: false,
-        message: '離線模式不支援題目匯入功能'
+        message: `匯入失敗: ${error.message}`
+      }
+    }
+  }
+
+  // 新增：批量操作方法
+  async batchImportQuestions(questionsData, batchSize = 50) {
+    try {
+      console.log(`=== 批量匯入開始（每批${batchSize}題）===`)
+      
+      const results = []
+      let totalSuccess = 0
+      let totalError = 0
+      const allErrors = []
+
+      for (let i = 0; i < questionsData.length; i += batchSize) {
+        const batch = questionsData.slice(i, i + batchSize)
+        console.log(`處理批次 ${Math.floor(i/batchSize) + 1}/${Math.ceil(questionsData.length/batchSize)}`)
+        
+        try {
+          const batchResult = await this.importQuestions(batch)
+          results.push(batchResult)
+          
+          if (batchResult.success && batchResult.data) {
+            totalSuccess += batchResult.data.success || 0
+            totalError += batchResult.data.error || 0
+            if (batchResult.data.errors) {
+              allErrors.push(...batchResult.data.errors)
+            }
+          }
+          
+          // 批次間隔，避免伺服器負載過重
+          if (i + batchSize < questionsData.length) {
+            await new Promise(resolve => setTimeout(resolve, 1000))
+          }
+          
+        } catch (error) {
+          console.error(`批次 ${Math.floor(i/batchSize) + 1} 失敗:`, error)
+          totalError += batch.length
+          allErrors.push(`批次 ${Math.floor(i/batchSize) + 1}: ${error.message}`)
+        }
+      }
+
+      return {
+        success: totalSuccess > 0,
+        message: `批量匯入完成`,
+        data: {
+          total: questionsData.length,
+          success: totalSuccess,
+          error: totalError,
+          errors: allErrors,
+          batches: results.length
+        }
+      }
+      
+    } catch (error) {
+      console.error('批量匯入失敗:', error)
+      return {
+        success: false,
+        message: `批量匯入失敗: ${error.message}`
+      }
+    }
+  }
+
+  // 新增：系統健康檢查
+  async healthCheck() {
+    try {
+      const result = await this.postRequest('health_check', {
+        timestamp: Date.now(),
+        client_version: '1.0.0'
+      })
+      return result
+    } catch (error) {
+      return {
+        success: false,
+        message: '健康檢查失敗',
+        error: error.message
       }
     }
   }
 }
-
 const apiService = new ApiService()
 
 function App() {

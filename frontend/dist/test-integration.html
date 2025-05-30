@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API 整合測試</title>
+</head>
+<body>
+    <h1>測試真實 API 整合</h1>
+    
+    <div>
+        <h3>登入測試</h3>
+        <input type="text" id="studentId" value="DEMO001" placeholder="學號">
+        <input type="password" id="password" value="demo123" placeholder="密碼">
+        <button onclick="testLogin()">測試登入</button>
+        <div id="loginResult"></div>
+    </div>
+
+    <div>
+        <h3>科目測試</h3>
+        <button onclick="testCategories()">取得科目</button>
+        <div id="categoriesResult"></div>
+    </div>
+
+    <script src="src/services/apiService.js"></script>
+    <script>
+        async function testLogin() {
+            try {
+                const studentId = document.getElementById('studentId').value;
+                const password = document.getElementById('password').value;
+                
+                const result = await apiService.login(studentId, password);
+                document.getElementById('loginResult').innerHTML = 
+                    '<pre>' + JSON.stringify(result, null, 2) + '</pre>';
+            } catch (error) {
+                document.getElementById('loginResult').innerHTML = 
+                    '<div style="color:red">錯誤: ' + error.message + '</div>';
+            }
+        }
+
+        async function testCategories() {
+            try {
+                const result = await apiService.getCategories();
+                document.getElementById('categoriesResult').innerHTML = 
+                    '<pre>' + JSON.stringify(result, null, 2) + '</pre>';
+            } catch (error) {
+                document.getElementById('categoriesResult').innerHTML = 
+                    '<div style="color:red">錯誤: ' + error.message + '</div>';
+            }
+        }
+    </script>
+</body>
+</html>
