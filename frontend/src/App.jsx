@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-// import ExcelImport from './ExcelImport' // 暫時註釋，稍後再加入
+import ExcelImport from './ExcelImport' // 暫時註釋，稍後再加入
 
 // API服務類
 class ApiService {
@@ -221,7 +221,7 @@ function App() {
   const [examQuestions, setExamQuestions] = useState([])
   const [examHistory, setExamHistory] = useState([])
   const [connectionStatus, setConnectionStatus] = useState('checking')
-  // const [showExcelImport, setShowExcelImport] = useState(false) // 暫時註釋，稍後使用
+  const [showExcelImport, setShowExcelImport] = useState(false) // 暫時註釋，稍後使用
 
   useEffect(() => {
     checkConnectionAndLoadData()
@@ -620,7 +620,7 @@ function App() {
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-lg font-semibold text-gray-900">選擇考試科目</h2>
               {/* Excel匯入功能 - 需要先建立 ExcelImport.jsx 檔案 */}
-              {currentUser?.role === 'admin' && connectionStatus === 'online' && false && (
+              {currentUser?.role === 'admin' && connectionStatus === 'online' && (
                 <button
                   onClick={() => alert('Excel匯入功能開發中，請稍後再試')}
                   className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm flex items-center gap-2"
