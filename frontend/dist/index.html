@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>醫檢師考試系統 - 國家考試線上練習平台</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- XLSX Library for Excel processing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- React 18 -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        /* 自定義樣式 */
+        .loading-spinner {
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .exam-card {
+            transition: all 0.3s ease;
+        }
+        
+        .exam-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .progress-bar {
+            transition: width 0.3s ease;
+        }
+        
+        /* 防止文字選取影響使用體驗 */
+        .question-option {
+            user-select: none;
+        }
+        
+        /* 響應式調整 */
+        @media (max-width: 768px) {
+            .mobile-padding {
+                padding: 1rem;
+            }
+            
+            .mobile-text {
+                font-size: 0.9rem;
+            }
+        }
+        
+        /* 考試模式的特殊樣式 */
+        .exam-mode {
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        }
+        
+        .result-card {
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+        }
+        
+        .error-card {
+            background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+        }
+    </style>
+</head>
+<body>
+    <!-- 主應用容器 -->
+    <div id="root"></div>
+    
+    <!-- 載入中覆蓋層 -->
+    <div id="loading-overlay" class="fixed inset-0 bg-white bg-opacity-90 flex items-center justify-center z-50" style="display: none;">
+        <div class="text-center">
+            <div class="loading-spinner mx-auto mb-4"></div>
+            <div class="text-lg font-medium text-gray-700">系統載入中...</div>
+            <div class="text-sm text-gray-500 mt-2">請稍候片刻</div>
+        </div>
+    </div>
+    
+    <!-- 錯誤提示模態框 -->
+    <div id="error-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" style="display: none;">
+        <div class="bg-white rounded-lg p-6 max-w-md mx-4">
+            <div class="text-center">
+                <div class="text-4xl mb-4">⚠️</div>
+                <h3 class="text-lg font-bold text-gray-800 mb-2">系統錯誤</h3>
+                <p id="error-message" class="text-gray-600 mb-4"></p>
+                <button 
+                    onclick="closeErrorModal()" 
+                    class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                    確定
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主要應用腳本 -->
+    <script type="text/babel">
+        // 載入中覆蓋層控制
+        window.showLoading = () => {
+            document.getElementById('loading-overlay').style.display = 'flex';
+        };
+        
+        window.hideLoading = () => {
+            document.getElementById('loading-overlay').style.display = 'none';
+        };
+        
+        // 錯誤模態框控制
+        window.showError = (message) => {
+            document.getElementById('error-message').textContent = message;
+            document.getElementById('error-modal').style.display = 'flex';
+        };
+        
+        window.closeErrorModal = () => {
+            document.getElementById('error-modal').style.display = 'none';
+        };
+        
+        // 全域錯誤處理
+        window.addEventListener('error', (event) => {
+            console.error('全域錯誤:', event.error);
+            showError('系統發生未知錯誤，請刷新頁面重試');
+        });
+        
+        window.addEventListener('unhandledrejection', (event) => {
+            console.error('未處理的Promise錯誤:', event.reason);
+            showError('網路請求失敗，請檢查網路連接');
+            event.preventDefault();
+        });
+
+        // ===== API服務類 =====
+        class ApiService {
+            constructor() {
+                this.baseURL = 'https://starsport.tw/exam/api/';
+                this.timeout = 15000;
+                console.log('✅ ApiService 初始化，API地址:', this.baseURL);
+            }
+
+            async makeRequest(action, data = {}) {
+                const requestData = { action, ...data };
+                console.log(`🚀 發送請求: ${action}`, requestData);
+
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+                    const response = await fetch(this.baseURL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify(requestData),
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP錯誤: ${response.status} ${response.statusText}`);
+                    }
+
+                    const text = await response.text();
+                    if (!text) {
+                        throw new Error('API回應為空');
+                    }
+
+                    const result = JSON.parse(text);
+                    if (result.success) {
+                        console.log(`✅ ${action} 請求成功`);
+                        return result;
+                    } else {
+                        throw new Error(result.message || 'API請求失敗');
+                    }
+
+                } catch (error) {
+                    console.error(`❌ ${action} 請求錯誤:`, error);
+                    if (error.name === 'AbortError') {
+                        throw new Error('請求超時，請檢查網路連接');
+                    }
+                    throw error;
+                }
+            }
+
+            async login(username, password) {
+                return await this.makeRequest('login', { username, password });
+            }
+
+            async getCategories() {
+                return await this.makeRequest('categories');
+            }
+
+            async getQuestions(categoryId, limit = 20) {
+                return await this.makeRequest('questions', { 
+                    category_id: parseInt(categoryId), 
+                    limit: parseInt(limit) 
+                });
+            }
+
+            async submitExam(userId, categoryId, answers, score, totalQuestions) {
+                return await this.makeRequest('submit', {
+                    user_id: parseInt(userId),
+                    category_id: parseInt(categoryId),
+                    answers: answers,
+                    score: parseInt(score),
+                    total_questions: parseInt(totalQuestions)
+                });
+            }
+
+            async getHistory(userId) {
+                return await this.makeRequest('history', { user_id: parseInt(userId) });
+            }
+
+            async importQuestions(questionsData, importSource = 'excel') {
+                return await this.makeRequest('import_questions', {
+                    questions_data: questionsData,
+                    import_source: importSource
+                });
+            }
+
+            async healthCheck() {
+                return await this.makeRequest('health_check');
+            }
+
+            async testConnection() {
+                try {
+                    const result = await this.healthCheck();
+                    return { success: true, data: result };
+                } catch (error) {
+                    return { success: false, error: error.message };
+                }
+            }
+        }
+
+        // 創建全域API服務實例
+        window.apiService = new ApiService();
+
+        // ===== Excel匯入組件 =====
+        const ExcelImport = ({ onImportComplete, onClose }) => {
+            const [file, setFile] = React.useState(null);
+            const [parsing, setParsing] = React.useState(false);
+            const [importing, setImporting] = React.useState(false);
+            const [previewData, setPreviewData] = React.useState([]);
+            const [importResult, setImportResult] = React.useState(null);
+            const [error, setError] = React.useState('');
+
+            const handleFileSelect = React.useCallback((event) => {
+                const selectedFile = event.target.files[0];
+                if (!selectedFile) return;
+
+                if (!selectedFile.name.match(/\.(xlsx|xls)$/)) {
+                    setError('請選擇有效的Excel文件 (.xlsx 或 .xls)');
+                    return;
+                }
+
+                setFile(selectedFile);
+                setError('');
+                setPreviewData([]);
+                setImportResult(null);
+            }, []);
+
+            const parseExcelFile = React.useCallback(async () => {
+                if (!file) return;
+
+                setParsing(true);
+                setError('');
+
+                try {
+                    const buffer = await file.arrayBuffer();
+                    const workbook = XLSX.read(buffer, { type: 'buffer' });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    const rawData = XLSX.utils.sheet_to_json(worksheet, { 
+                        header: 1,
+                        defval: '',
+                        blankrows: false
+                    });
+
+                    if (rawData.length < 2) {
+                        throw new Error('Excel文件必須包含標題行和至少一行數據');
+                    }
+
+                    const headers = rawData[0];
+                    const dataRows = rawData.slice(1).filter(row => 
+                        row.some(cell => cell !== null && cell !== undefined && cell !== '')
+                    );
+
+                    const mappedData = dataRows.map((row, index) => {
+                        // 簡化的映射邏輯
+                        return {
+                            questionNumber: index + 1,
+                            year: 2015,
+                            semester: 1,
+                            categoryId: 6,
+                            subCategory: '臨床血清免疫學與臨床病毒學',
+                            question: row[0] || '',
+                            optionA: row[1] || '',
+                            optionB: row[2] || '',
+                            optionC: row[3] || '',
+                            optionD: row[4] || '',
+                            correctAnswer: (row[5] || 'A').toString().toUpperCase(),
+                            explanation: row[6] || '',
+                            difficulty: 'medium'
+                        };
+                    }).filter(row => row.question);
+
+                    setPreviewData(mappedData);
+                    console.log('解析成功，題目數量:', mappedData.length);
+
+                } catch (error) {
+                    console.error('Excel解析錯誤:', error);
+                    setError(`Excel解析失敗: ${error.message}`);
+                } finally {
+                    setParsing(false);
+                }
+            }, [file]);
+
+            const handleImport = React.useCallback(async () => {
+                if (previewData.length === 0) {
+                    setError('沒有可匯入的數據，請先解析Excel文件');
+                    return;
+                }
+
+                setImporting(true);
+                setError('');
+
+                try {
+                    const result = await window.apiService.importQuestions(previewData, 'excel');
+                    setImportResult(result.data);
+                    
+                    if (onImportComplete) {
+                        onImportComplete(result.data);
+                    }
+
+                } catch (error) {
+                    console.error('匯入失敗:', error);
+                    setError(`匯入失敗: ${error.message}`);
+                } finally {
+                    setImporting(false);
+                }
+            }, [previewData, onImportComplete]);
+
+            return (
+                <div className="max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-lg">
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-bold text-gray-800">📊 Excel題目匯入</h2>
+                        {onClose && (
+                            <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                        )}
+                    </div>
+
+                    {/* 文件選擇 */}
+                    <div className="mb-6">
+                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                            <input
+                                type="file"
+                                accept=".xlsx,.xls"
+                                onChange={handleFileSelect}
+                                className="hidden"
+                                id="excel-file-input"
+                            />
+                            <label htmlFor="excel-file-input" className="cursor-pointer block">
+                                <div className="mb-4"><span className="text-4xl">📁</span></div>
+                                <div className="text-lg font-medium text-gray-700 mb-2">選擇Excel文件</div>
+                                <div className="text-sm text-gray-500">支援 .xlsx 和 .xls 格式</div>
+                            </label>
+                        </div>
+
+                        {file && (
+                            <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <span className="font-medium">已選擇文件：</span>
+                                        <span className="text-blue-600">{file.name}</span>
+                                    </div>
+                                    <div className="space-x-2">
+                                        <button
+                                            onClick={parseExcelFile}
+                                            disabled={parsing}
+                                            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                                        >
+                                            {parsing ? '解析中...' : '解析文件'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* 錯誤顯示 */}
+                    {error && (
+                        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+                            <div className="text-red-700">❌ 錯誤：{error}</div>
+                        </div>
+                    )}
+
+                    {/* 預覽和匯入 */}
+                    {previewData.length > 0 && (
+                        <div className="mb-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-xl font-bold text-gray-800">📋 資料預覽 ({previewData.length} 題)</h3>
+                                <button
+                                    onClick={handleImport}
+                                    disabled={importing}
+                                    className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
+                                >
+                                    {importing ? '匯入中...' : `匯入 ${previewData.length} 題`}
+                                </button>
+                            </div>
+
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full border border-gray-300 rounded-lg">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-4 py-2 border text-left">題號</th>
+                                            <th className="px-4 py-2 border text-left">題目</th>
+                                            <th className="px-4 py-2 border text-left">答案</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {previewData.slice(0, 5).map((item, index) => (
+                                            <tr key={index} className="hover:bg-gray-50">
+                                                <td className="px-4 py-2 border">{item.questionNumber}</td>
+                                                <td className="px-4 py-2 border">
+                                                    <div className="max-w-md truncate" title={item.question}>
+                                                        {item.question}
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-2 border text-center">
+                                                    <span className="inline-block w-6 h-6 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+                                                        {item.correctAnswer}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                                {previewData.length > 5 && (
+                                    <div className="text-center py-2 text-gray-500">
+                                        顯示前5題，共{previewData.length}題
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 匯入結果 */}
+                    {importResult && (
+                        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+                            <h3 className="text-lg font-bold text-green-800 mb-3">🎉 匯入完成</h3>
+                            <div className="grid grid-cols-4 gap-4 text-center">
+                                <div className="bg-white p-3 rounded">
+                                    <div className="text-2xl font-bold text-blue-600">{importResult.total}</div>
+                                    <div className="text-sm text-gray-600">總題目</div>
+                                </div>
+                                <div className="bg-white p-3 rounded">
+                                    <div className="text-2xl font-bold text-green-600">{importResult.success}</div>
+                                    <div className="text-sm text-gray-600">成功</div>
+                                </div>
+                                <div className="bg-white p-3 rounded">
+                                    <div className="text-2xl font-bold text-orange-600">{importResult.duplicate || 0}</div>
+                                    <div className="text-sm text-gray-600">重複跳過</div>
+                                </div>
+                                <div className="bg-white p-3 rounded">
+                                    <div className="text-2xl font-bold text-red-600">{importResult.error}</div>
+                                    <div className="text-sm text-gray-600">失敗</div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ===== 主應用組件 =====
+        const App = () => {
+            const [currentUser, setCurrentUser] = React.useState(null);
+            const [categories, setCategories] = React.useState([]);
+            const [currentView, setCurrentView] = React.useState('home');
+            const [selectedCategory, setSelectedCategory] = React.useState(null);
+            const [questions, setQuestions] = React.useState([]);
+            const [currentQuestionIndex, setCurrentQuestionIndex] = React.useState(0);
+            const [answers, setAnswers] = React.useState({});
+            const [examHistory, setExamHistory] = React.useState([]);
+            const [loading, setLoading] = React.useState(false);
+            const [error, setError] = React.useState('');
+            const [examResult, setExamResult] = React.useState(null);
+
+            // 初始化
+            React.useEffect(() => {
+                initializeApp();
+            }, []);
+
+            const initializeApp = async () => {
+                try {
+                    setLoading(true);
+                    showLoading();
+                    
+                    const connectionTest = await window.apiService.testConnection();
+                    if (!connectionTest.success) {
+                        throw new Error('API連接失敗，請檢查網路連接');
+                    }
+
+                    await loadCategories();
+                    console.log('✅ 應用初始化完成');
+                } catch (error) {
+                    console.error('❌ 應用初始化失敗:', error);
+                    setError('系統初始化失敗: ' + error.message);
+                    showError('系統初始化失敗: ' + error.message);
+                } finally {
+                    setLoading(false);
+                    hideLoading();
+                }
+            };
+
+            const loadCategories = async () => {
+                const result = await window.apiService.getCategories();
+                if (result.success) {
+                    setCategories(result.data || []);
+                }
+            };
+
+            const handleLogin = async () => {
+                try {
+                    setLoading(true);
+                    const result = await window.apiService.login('DEMO001', 'demo123');
+                    if (result.success) {
+                        setCurrentUser(result.data.user);
+                        await loadExamHistory(result.data.user.id);
+                    }
+                } catch (error) {
+                    setError('登入失敗: ' + error.message);
+                    showError('登入失敗: ' + error.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const loadExamHistory = async (userId) => {
+                try {
+                    const result = await window.apiService.getHistory(userId);
+                    if (result.success) {
+                        setExamHistory(result.data || []);
+                    }
+                } catch (error) {
+                    console.error('歷史記錄載入失敗:', error);
+                }
+            };
+
+            const startExam = async (categoryId) => {
+                try {
+                    setLoading(true);
+                    showLoading();
+                    
+                    if (!currentUser) {
+                        await handleLogin();
+                    }
+
+                    const result = await window.apiService.getQuestions(categoryId, 20);
+                    if (result.success && result.data.length > 0) {
+                        setSelectedCategory(categories.find(c => c.id === categoryId));
+                        setQuestions(result.data);
+                        setCurrentQuestionIndex(0);
+                        setAnswers({});
+                        setExamResult(null);
+                        setCurrentView('exam');
+                    } else {
+                        throw new Error('無法載入題目');
+                    }
+                } catch (error) {
+                    setError('開始考試失敗: ' + error.message);
+                    showError('開始考試失敗: ' + error.message);
+                } finally {
+                    setLoading(false);
+                    hideLoading();
+                }
+            };
+
+            const answerQuestion = (questionId, answer) => {
+                setAnswers(prev => ({ ...prev, [questionId]: answer }));
+            };
+
+            const submitExam = async () => {
+                try {
+                    setLoading(true);
+                    
+                    let correctCount = 0;
+                    questions.forEach(question => {
+                        if (answers[question.id] === question.correct_answer) {
+                            correctCount++;
+                        }
+                    });
+                    
+                    const score = Math.round((correctCount / questions.length) * 100);
+
+                    const result = await window.apiService.submitExam(
+                        currentUser.id,
+                        selectedCategory.id,
+                        answers,
+                        score,
+                        questions.length
+                    );
+
+                    if (result.success) {
+                        setExamResult({
+                            score,
+                            correctCount,
+                            totalQuestions: questions.length
+                        });
+                        await loadExamHistory(currentUser.id);
+                    }
+                } catch (error) {
+                    showError('考試提交失敗: ' + error.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const goHome = () => {
+                setCurrentView('home');
+                setQuestions([]);
+                setAnswers({});
+                setExamResult(null);
+                setError('');
+            };
+
+            // 登入界面
+            if (!currentUser) {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-lg shadow-xl p-8 w-full max-w-md fade-in">
+                            <div className="text-center mb-8">
+                                <h1 className="text-3xl font-bold text-gray-800 mb-2">🏥 醫檢師考試系統</h1>
+                                <p className="text-gray-600">國家考試線上練習平台</p>
+                            </div>
+                            
+                            <button
+                                onClick={handleLogin}
+                                disabled={loading}
+                                className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium transition-colors"
+                            >
+                                {loading ? '登入中...' : '🚀 開始練習 (展示模式)'}
+                            </button>
+                            
+                            {error && (
+                                <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+                                    {error}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+
+            // 考試界面
+            if (currentView === 'exam' && !examResult) {
+                if (questions.length === 0) {
+                    return <div className="min-h-screen flex items-center justify-center">載入題目中...</div>;
+                }
+
+                const currentQuestion = questions[currentQuestionIndex];
+                const userAnswer = answers[currentQuestion.id];
+
+                return (
+                    <div className="min-h-screen bg-gray-50 exam-mode">
+                        <div className="bg-white shadow-sm border-b">
+                            <div className="max-w-4xl mx-auto px-4 py-4">
+                                <div className="flex justify-between items-center">
+                                    <div>
+                                        <h2 className="text-xl font-bold text-gray-800">{selectedCategory?.name}</h2>
+                                        <p className="text-gray-600">第 {currentQuestionIndex + 1} 題 / 共 {questions.length} 題</p>
+                                    </div>
+                                    <div className="flex space-x-2">
+                                        <button
+                                            onClick={goHome}
+                                            className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+                                        >
+                                            返回首頁
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                if (confirm('確定要提交考試嗎？')) {
+                                                    submitExam();
+                                                }
+                                            }}
+                                            disabled={loading}
+                                            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                                        >
+                                            {loading ? '提交中...' : '提交考試'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="max-w-4xl mx-auto px-4 py-8">
+                            <div className="bg-white rounded-lg shadow-md p-8">
+                                <div className="mb-8">
+                                    <div className="text-lg font-medium text-gray-800 mb-6 leading-relaxed">
+                                        {currentQuestion.question}
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        {['A', 'B', 'C', 'D'].map(option => (
+                                            <label
+                                                key={option}
+                                                className={`block p-4 border-2 rounded-lg cursor-pointer transition-colors question-option ${
+                                                    userAnswer === option
+                                                        ? 'border-blue-500 bg-blue-50'
+                                                        : 'border-gray-200 hover:border-gray-300'
+                                                }`}
+                                            >
+                                                <div className="flex items-start">
+                                                    <input
+                                                        type="radio"
+                                                        name={`question-${currentQuestion.id}`}
+                                                        value={option}
+                                                        checked={userAnswer === option}
+                                                        onChange={() => answerQuestion(currentQuestion.id, option)}
+                                                        className="mt-1 mr-3"
+                                                    />
+                                                    <div>
+                                                        <span className="font-medium text-blue-600 mr-2">{option}.</span>
+                                                        <span className="text-gray-800">
+                                                            {currentQuestion[`option_${option.toLowerCase()}`]}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="flex justify-between items-center">
+                                    <button
+                                        onClick={() => setCurrentQuestionIndex(Math.max(0, currentQuestionIndex - 1))}
+                                        disabled={currentQuestionIndex === 0}
+                                        className="px-6 py-3 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50"
+                                    >
+                                        ← 上一題
+                                    </button>
+
+                                    <div className="text-center">
+                                        <div className="text-sm text-gray-600 mb-2">進度</div>
+                                        <div className="w-32 bg-gray-200 rounded-full h-2">
+                                            <div 
+                                                className="bg-blue-600 h-2 rounded-full progress-bar"
+                                                style={{width: `${((currentQuestionIndex + 1) / questions.length) * 100}%`}}
+                                            ></div>
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        onClick={() => setCurrentQuestionIndex(Math.min(questions.length - 1, currentQuestionIndex + 1))}
+                                        disabled={currentQuestionIndex === questions.length - 1}
+                                        className="px-6 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                                    >
+                                        下一題 →
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // 考試結果界面
+            if (examResult) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-lg shadow-xl p-8 max-w-2xl w-full result-card fade-in">
+                            <div className="text-center">
+                                <div className="text-6xl mb-6">
+                                    {examResult.score >= 80 ? '🎉' : examResult.score >= 60 ? '👍' : '📚'}
+                                </div>
+                                <h2 className="text-3xl font-bold text-gray-800 mb-4">考試完成！</h2>
+                                
+                                <div className="grid grid-cols-2 gap-6 my-8">
+                                    <div className="bg-blue-50 p-4 rounded-lg">
+                                        <div className="text-3xl font-bold text-blue-600">{examResult.score}</div>
+                                        <div className="text-sm text-gray-600">分數</div>
+                                    </div>
+                                    <div className="bg-green-50 p-4 rounded-lg">
+                                        <div className="text-3xl font-bold text-green-600">
+                                            {examResult.correctCount}/{examResult.totalQuestions}
+                                        </div>
+                                        <div className="text-sm text-gray-600">正確題數</div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <button
+                                        onClick={() => startExam(selectedCategory.id)}
+                                        className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700"
+                                    >
+                                        🔄 重新考試
+                                    </button>
+                                    <button
+                                        onClick={goHome}
+                                        className="w-full bg-gray-600 text-white py-3 px-6 rounded-lg hover:bg-gray-700"
+                                    >
+                                        🏠 返回首頁
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // 匯入界面
+            if (currentView === 'import') {
+                return (
+                    <div className="min-h-screen bg-gray-50">
+                        <div className="max-w-6xl mx-auto px-4 py-8">
+                            <ExcelImport
+                                onImportComplete={async (importData) => {
+                                    await loadCategories();
+                                    alert(`🎉 匯入完成！成功: ${importData.success} 題`);
+                                    setCurrentView('home');
+                                }}
+                                onClose={() => setCurrentView('home')}
+                            />
+                        </div>
+                    </div>
+                );
+            }
+
+            // 首頁
+            return (
+                <div className="min-h-screen bg-gray-50">
+                    <nav className="bg-white shadow-sm border-b">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                            <div className="flex justify-between items-center h-16">
+                                <h1 className="text-xl font-bold text-gray-800">🏥 醫檢師考試系統</h1>
+                                <div className="flex items-center space-x-4">
+                                    <span className="text-gray-600">歡迎，{currentUser?.name}</span>
+                                    <button
+                                        onClick={() => setCurrentView('import')}
+                                        className="px-4 py-2 text-green-600 hover:bg-green-50 rounded"
+                                    >
+                                        📥 匯入題目
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </nav>
+
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                        <div className="text-center mb-12">
+                            <h2 className="text-3xl font-bold text-gray-800 mb-4">選擇考試科目</h2>
+                            <p className="text-gray-600">選擇你要練習的醫檢師考試科目</p>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {categories.map(category => (
+                                <div
+                                    key={category.id}
+                                    className="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow p-6 cursor-pointer exam-card"
+                                    onClick={() => startExam(category.id)}
+                                >
+                                    <div className="text-center">
+                                        <div className="text-4xl mb-4">📚</div>
+                                        <h3 className="text-lg font-bold text-gray-800 mb-2">
+                                            {category.name}
+                                        </h3>
+                                        <p className="text-gray-600 text-sm mb-4">
+                                            {category.description}
+                                        </p>
+                                        <button className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition-colors">
+                                            開始考試
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {categories.length === 0 && !loading && (
+                            <div className="text-center py-12">
+                                <div className="text-6xl mb-4">📚</div>
+                                <h3 className="text-xl font-bold text-gray-600 mb-2">暫無考試科目</h3>
+                                <p className="text-gray-500">請使用匯入功能添加考試題目</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // 渲染應用
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
