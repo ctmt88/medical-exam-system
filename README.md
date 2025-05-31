@@ -313,3 +313,8 @@ tar -czf backup.tar.gz /path/to/exam/system/
 - 最後更新: 週六 2025/05/31 11:02:08.70 
 - 狀態: 重新部署中... 
 - 網址: [https://ctmt88.github.io/medical-exam-system/](https://ctmt88.github.io/medical-exam-system/) 
+ 
+## 🚀 部署狀態 
+- 最後更新: 週六 2025/05/31 11:05:32.04 
+- 狀態: 重新部署中... 
+- 網址: [https://ctmt88.github.io/medical-exam-system/](https://ctmt88.github.io/medical-exam-system/) 
