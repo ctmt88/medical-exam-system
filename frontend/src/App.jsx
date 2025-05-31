@@ -1,967 +1,664 @@
-import React, { useState, useEffect } from 'react'
-import ExcelImport from './ExcelImport' // 取消註釋
+/**
+ * 主應用組件
+ * 檔案名稱: App.jsx
+ * 醫檢師考試系統前端主應用
+ */
 
-// 在 App.jsx 中，替換整個 ApiService 類
-// 在 App.jsx 中，替換整個 ApiService 類
+import React, { useState, useEffect, useCallback } from 'react';
+import apiService from './ApiService';
+import ExcelImport from './ExcelImport';
 
-class ApiService {
-  constructor() {
-    this.baseURL = 'https://starsport.tw/exam/api/'
-    this.fallbackMode = false
-    this.connectionTested = false
-  }
+const App = () => {
+    // 狀態管理
+    const [currentUser, setCurrentUser] = useState(null);
+    const [categories, setCategories] = useState([]);
+    const [currentView, setCurrentView] = useState('home'); // home, exam, history, import
+    const [selectedCategory, setSelectedCategory] = useState(null);
+    const [questions, setQuestions] = useState([]);
+    const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+    const [answers, setAnswers] = useState({});
+    const [examHistory, setExamHistory] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [examStartTime, setExamStartTime] = useState(null);
+    const [examCompleted, setExamCompleted] = useState(false);
+    const [examResult, setExamResult] = useState(null);
 
-  async testConnection() {
-    try {
-      console.log('=== 測試API連接 ===')
-      console.log('測試URL:', this.baseURL)
-      
-      // 使用POST方式測試健康檢查，更可靠
-      const response = await fetch(this.baseURL, {
-        method: 'POST',
-        mode: 'cors',
-        credentials: 'omit',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          action: 'health_check',
-          timestamp: Date.now()
-        })
-      })
+    // 初始化應用
+    useEffect(() => {
+        initializeApp();
+    }, []);
 
-      console.log('連接測試響應狀態:', response.status)
-      
-      if (response.ok) {
-        const text = await response.text()
-        console.log('連接測試響應內容:', text.substring(0, 200))
-        
+    const initializeApp = async () => {
         try {
-          const result = JSON.parse(text)
-          if (result.success) {
-            console.log('✅ API連接測試成功')
-            this.connectionTested = true
-            this.fallbackMode = false
-            return true
-          }
-        } catch (parseError) {
-          console.error('JSON解析錯誤:', parseError)
-        }
-      }
-      
-      // 如果健康檢查失敗，嘗試基本連接測試
-      console.log('健康檢查失敗，嘗試基本連接測試...')
-      const basicResponse = await fetch(this.baseURL, {
-        method: 'GET',
-        mode: 'cors',
-        credentials: 'omit',
-        headers: {
-          'Accept': 'application/json'
-        }
-      })
-      
-      console.log('基本連接測試狀態:', basicResponse.status)
-      
-      // 如果能收到任何響應（包括400錯誤），說明API是可用的
-      if (basicResponse.status === 400 || basicResponse.status === 200) {
-        console.log('✅ 基本連接測試成功（收到響應）')
-        this.connectionTested = true
-        this.fallbackMode = false
-        return true
-      }
-      
-      throw new Error(`HTTP ${basicResponse.status}`)
-      
-    } catch (error) {
-      console.error('❌ API連接測試失敗:', error)
-      this.connectionTested = true
-      this.fallbackMode = true
-      return false
-    }
-  }
-
-  // 統一的POST請求方法
-  async postRequest(action, data = {}, retries = 2) {
-    // 如果已經是離線模式，直接拋出錯誤
-    if (this.fallbackMode) {
-      throw new Error('系統處於離線模式')
-    }
-
-    for (let i = 0; i <= retries; i++) {
-      try {
-        const requestData = {
-          action: action,
-          ...data
-        }
-
-        console.log(`=== POST請求 ${action} (嘗試 ${i + 1}/${retries + 1}) ===`)
-        console.log('請求數據:', requestData)
-
-        const response = await fetch(this.baseURL, {
-          method: 'POST',
-          mode: 'cors',
-          credentials: 'omit',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-cache',
-          },
-          body: JSON.stringify(requestData)
-        })
-
-        console.log(`${action} HTTP狀態:`, response.status, response.statusText)
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-        }
-
-        const text = await response.text()
-        console.log(`${action} 響應內容:`, text.substring(0, 300) + (text.length > 300 ? '...' : ''))
-
-        try {
-          const result = JSON.parse(text)
-          console.log(`✅ ${action} 請求成功:`, result)
-          return result
-        } catch (jsonError) {
-          console.error(`${action} JSON解析失敗:`, jsonError)
-          throw new Error('API回應格式錯誤: ' + text.substring(0, 100))
-        }
-
-      } catch (error) {
-        console.error(`❌ ${action} 請求失敗 (嘗試 ${i + 1}/${retries + 1}):`, error)
-        
-        if (i === retries) {
-          // 最後一次重試失敗，設置離線模式
-          console.warn(`${action} 最終失敗，可能需要切換到離線模式`)
-          throw error
-        }
-        
-        // 等待重試
-        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)))
-      }
-    }
-  }
-
-  async login(username, password) {
-    try {
-      const result = await this.postRequest('login', {
-        username: username.trim(),
-        password: password.trim()
-      })
-      return result
-    } catch (error) {
-      console.error('登入API錯誤:', error)
-      
-      // 只有在特定情況下才使用離線模式
-      if (username === 'DEMO001' && password === 'demo123' && this.fallbackMode) {
-        console.log('使用離線模式登入')
-        return {
-          success: true,
-          user: { id: 1, username: 'DEMO001', name: '展示用戶', role: 'admin' },
-          message: '離線模式登入成功'
-        }
-      }
-      throw error
-    }
-  }
-
-  async getCategories() {
-    try {
-      return await this.postRequest('categories')
-    } catch (error) {
-      console.error('科目獲取失敗:', error)
-      
-      // 設置離線模式並返回預設數據
-      this.fallbackMode = true
-      console.log('切換到離線模式 - 使用預設科目資料')
-      return {
-        success: true,
-        data: [
-          { id: 1, name: '臨床生理學與病理學', description: '心電圖、肺功能、腦波檢查等' },
-          { id: 2, name: '臨床血液學與血庫學', description: '血球計數、凝血功能、血型檢驗等' },
-          { id: 3, name: '醫學分子檢驗學與臨床鏡檢學', description: 'PCR技術、基因定序、寄生蟲檢驗等' },
-          { id: 4, name: '微生物學與臨床微生物學', description: '細菌培養、抗生素敏感性、黴菌檢驗等' },
-          { id: 5, name: '生物化學與臨床生化學', description: '肝功能、腎功能、血糖檢驗等' },
-          { id: 6, name: '臨床血清免疫學與臨床病毒學', description: '腫瘤標記、自體免疫、病毒檢驗等' }
-        ]
-      }
-    }
-  }
-
-  async getQuestions(categoryId) {
-    try {
-      return await this.postRequest('questions', {
-        category_id: categoryId
-      })
-    } catch (error) {
-      console.error('題目獲取失敗:', error)
-      
-      // 設置離線模式並返回模擬題目
-      this.fallbackMode = true
-      console.log('切換到離線模式 - 使用模擬題目')
-      const mockQuestions = Array.from({ length: 20 }, (_, i) => ({
-        id: i + 1,
-        question: `第${i + 1}題：關於醫事檢驗的描述，下列何者正確？`,
-        option_a: `選項A：這是第${i + 1}題的選項A`,
-        option_b: `選項B：這是第${i + 1}題的選項B`,
-        option_c: `選項C：這是第${i + 1}題的選項C`,
-        option_d: `選項D：這是第${i + 1}題的選項D`,
-        correct_answer: ['A', 'B', 'C', 'D'][i % 4]
-      }))
-      return { success: true, data: mockQuestions }
-    }
-  }
-
-  async submitExam(examData) {
-    try {
-      return await this.postRequest('submit', {
-        user_id: examData.userId,
-        category_id: examData.categoryId,
-        answers: examData.answers,
-        score: examData.score
-      })
-    } catch (error) {
-      console.error('考試提交失敗:', error)
-      console.log('離線模式：成績未儲存到伺服器')
-      return {
-        success: false,
-        message: '離線模式：成績未儲存'
-      }
-    }
-  }
-
-  async getExamHistory(userId) {
-    try {
-      return await this.postRequest('history', {
-        user_id: userId
-      })
-    } catch (error) {
-      console.error('歷史記錄獲取失敗:', error)
-      console.log('離線模式：無歷史記錄')
-      return {
-        success: true,
-        data: [
-          { id: 1, category_id: 1, score: 85, exam_date: new Date().toISOString() },
-          { id: 2, category_id: 2, score: 78, exam_date: new Date(Date.now() - 86400000).toISOString() }
-        ]
-      }
-    }
-  }
-
-  async importQuestions(questionsData) {
-    try {
-      console.log('=== Excel題目匯入開始 ===')
-      console.log('題目數量:', questionsData.length)
-      console.log('第一筆資料:', questionsData[0])
-      
-      const result = await this.postRequest('import_questions', {
-        questions_data: questionsData,
-        import_source: 'excel',
-        import_time: new Date().toISOString()
-      })
-
-      console.log('=== 匯入結果 ===')
-      console.log('結果:', result)
-      
-      return result
-    } catch (error) {
-      console.error('=== 匯入錯誤 ===')
-      console.error('錯誤詳情:', error)
-      return {
-        success: false,
-        message: `匯入失敗: ${error.message}`
-      }
-    }
-  }
-
-  // 批量匯入方法
-  async batchImportQuestions(questionsData, batchSize = 50) {
-    try {
-      console.log(`=== 批量匯入開始（每批${batchSize}題）===`)
-      
-      const results = []
-      let totalSuccess = 0
-      let totalError = 0
-      const allErrors = []
-
-      for (let i = 0; i < questionsData.length; i += batchSize) {
-        const batch = questionsData.slice(i, i + batchSize)
-        console.log(`處理批次 ${Math.floor(i/batchSize) + 1}/${Math.ceil(questionsData.length/batchSize)}`)
-        
-        try {
-          const batchResult = await this.importQuestions(batch)
-          results.push(batchResult)
-          
-          if (batchResult.success && batchResult.data) {
-            totalSuccess += batchResult.data.success || 0
-            totalError += batchResult.data.error || 0
-            if (batchResult.data.errors) {
-              allErrors.push(...batchResult.data.errors)
+            setLoading(true);
+            
+            // 測試API連接
+            const connectionTest = await apiService.testConnection();
+            if (!connectionTest.success) {
+                throw new Error('API連接失敗，請檢查網路連接或聯繫管理員');
             }
-          }
-          
-          // 批次間隔
-          if (i + batchSize < questionsData.length) {
-            await new Promise(resolve => setTimeout(resolve, 1000))
-          }
-          
+
+            // 載入科目列表
+            await loadCategories();
+            
+            console.log('✅ 應用初始化完成');
         } catch (error) {
-          console.error(`批次 ${Math.floor(i/batchSize) + 1} 失敗:`, error)
-          totalError += batch.length
-          allErrors.push(`批次 ${Math.floor(i/batchSize) + 1}: ${error.message}`)
+            console.error('❌ 應用初始化失敗:', error);
+            setError('系統初始化失敗: ' + error.message);
+        } finally {
+            setLoading(false);
         }
-      }
+    };
 
-      return {
-        success: totalSuccess > 0,
-        message: `批量匯入完成`,
-        data: {
-          total: questionsData.length,
-          success: totalSuccess,
-          error: totalError,
-          errors: allErrors,
-          batches: results.length
+    // 載入科目列表
+    const loadCategories = async () => {
+        try {
+            const result = await apiService.getCategories();
+            if (result.success) {
+                setCategories(result.data || []);
+                console.log('✅ 科目載入成功:', result.data.length, '個科目');
+            }
+        } catch (error) {
+            console.error('❌ 科目載入失敗:', error);
+            throw error;
         }
-      }
-      
-    } catch (error) {
-      console.error('批量匯入失敗:', error)
-      return {
-        success: false,
-        message: `批量匯入失敗: ${error.message}`
-      }
-    }
-  }
+    };
 
-  // 健康檢查
-  async healthCheck() {
-    try {
-      const result = await this.postRequest('health_check', {
-        timestamp: Date.now(),
-        client_version: '1.0.0'
-      })
-      return result
-    } catch (error) {
-      return {
-        success: false,
-        message: '健康檢查失敗',
-        error: error.message
-      }
-    }
-  }
-}
-const apiService = new ApiService()
+    // 登入功能
+    const handleLogin = async (username = 'DEMO001', password = 'demo123') => {
+        try {
+            setLoading(true);
+            setError('');
 
-function App() {
-  const [currentView, setCurrentView] = useState('home')
-  const [isLoggedIn, setIsLoggedIn] = useState(false)
-  const [showLoginModal, setShowLoginModal] = useState(false)
-  const [selectedSubject, setSelectedSubject] = useState(null)
-  const [examTimer, setExamTimer] = useState(3600)
-  const [currentQuestion, setCurrentQuestion] = useState(0)
-  const [userAnswers, setUserAnswers] = useState({})
-  const [markedQuestions, setMarkedQuestions] = useState(new Set())
-  const [isExamActive, setIsExamActive] = useState(false)
-  const [showSubmitModal, setShowSubmitModal] = useState(false)
-  const [loginData, setLoginData] = useState({ username: 'DEMO001', password: 'demo123' })
-  const [currentUser, setCurrentUser] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [subjects, setSubjects] = useState([])
-  const [examQuestions, setExamQuestions] = useState([])
-  const [examHistory, setExamHistory] = useState([])
-  const [connectionStatus, setConnectionStatus] = useState('checking')
-  
-  // 新增：Excel匯入相關狀態
-  const [showExcelImport, setShowExcelImport] = useState(false)
-
-  // 檢查是否為管理員
-  const isAdmin = () => {
-    return currentUser && (currentUser.role === 'admin' || currentUser.username === 'DEMO001')
-  }
-
-  useEffect(() => {
-    checkConnectionAndLoadData()
-  }, [])
-
-  useEffect(() => {
-    let interval = null
-    if (isExamActive && examTimer > 0) {
-      interval = setInterval(() => {
-        setExamTimer(timer => timer - 1)
-      }, 1000)
-    } else if (examTimer === 0) {
-      setIsExamActive(false)
-      alert('時間到！考試結束')
-      handleAutoSubmit()
-    }
-    return () => clearInterval(interval)
-  }, [isExamActive, examTimer])
-
-  const checkConnectionAndLoadData = async () => {
-    try {
-      setLoading(true)
-      setConnectionStatus('checking')
-      
-      const isConnected = await apiService.testConnection()
-      setConnectionStatus(isConnected ? 'online' : 'offline')
-      
-      const data = await apiService.getCategories()
-      if (data.success) {
-        setSubjects(data.data)
-      }
-    } catch (error) {
-      console.error('初始化失敗:', error)
-      setConnectionStatus('offline')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const formatTime = (seconds) => {
-    const hours = Math.floor(seconds / 3600)
-    const minutes = Math.floor((seconds % 3600) / 60)
-    const secs = seconds % 60
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-  }
-
-  const handleLogin = async () => {
-    try {
-      setLoading(true)
-      setError('')
-
-      console.log('嘗試登入:', loginData.username)
-      const data = await apiService.login(loginData.username, loginData.password)
-
-      if (data.success) {
-        setCurrentUser(data.user)
-        setIsLoggedIn(true)
-        setShowLoginModal(false)
-        
-        setError('')
-        setSelectedSubject(null)
-        
-        setCurrentView('dashboard')
-        
-        await loadExamHistory(data.user.id)
-        if (data.message) {
-          console.log('登入訊息:', data.message)
+            const result = await apiService.login(username, password);
+            if (result.success) {
+                setCurrentUser(result.data.user);
+                console.log('✅ 登入成功:', result.data.user);
+                
+                // 載入用戶歷史記錄
+                await loadExamHistory(result.data.user.id);
+            }
+        } catch (error) {
+            console.error('❌ 登入失敗:', error);
+            setError('登入失敗: ' + error.message);
+        } finally {
+            setLoading(false);
         }
-      } else {
-        setError(data.message || '登入失敗')
-      }
-    } catch (error) {
-      console.error('登入錯誤詳情:', error)
-      setError(`連線錯誤: ${error.message}`)
-    } finally {
-      setLoading(false)
-    }
-  }
+    };
 
-  const loadExamHistory = async (userId) => {
-    try {
-      const data = await apiService.getExamHistory(userId)
-      if (data.success) {
-        setExamHistory(data.data)
-      }
-    } catch (error) {
-      console.error('載入考試記錄失敗:', error)
-    }
-  }
+    // 載入考試歷史
+    const loadExamHistory = async (userId) => {
+        try {
+            const result = await apiService.getHistory(userId);
+            if (result.success) {
+                setExamHistory(result.data || []);
+                console.log('✅ 歷史記錄載入成功:', result.data.length, '條記錄');
+            }
+        } catch (error) {
+            console.error('❌ 歷史記錄載入失敗:', error);
+        }
+    };
 
-  const handleSubjectClick = (subjectId) => {
-    if (isLoggedIn) {
-      startExam(subjectId)
-    } else {
-      setSelectedSubject(subjects.find(s => s.id === subjectId))
-      setShowLoginModal(true)
-    }
-  }
+    // 開始考試
+    const startExam = async (categoryId) => {
+        try {
+            setLoading(true);
+            setError('');
+            
+            if (!currentUser) {
+                await handleLogin();
+            }
 
-  const startExam = async (subjectId) => {
-    try {
-      setLoading(true)
-      const subject = subjects.find(s => s.id === subjectId)
-      const questionsData = await apiService.getQuestions(subjectId)
+            console.log('🎯 開始考試，科目ID:', categoryId);
+            
+            const result = await apiService.getQuestions(categoryId, 20);
+            if (result.success && result.data.length > 0) {
+                setSelectedCategory(categories.find(c => c.id === categoryId));
+                setQuestions(result.data);
+                setCurrentQuestionIndex(0);
+                setAnswers({});
+                setExamStartTime(new Date());
+                setExamCompleted(false);
+                setExamResult(null);
+                setCurrentView('exam');
+                
+                console.log('✅ 考試開始，載入', result.data.length, '題');
+            } else {
+                throw new Error('無法載入題目，請稍後再試');
+            }
+        } catch (error) {
+            console.error('❌ 開始考試失敗:', error);
+            setError('開始考試失敗: ' + error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
 
-      if (questionsData.success && questionsData.data.length > 0) {
-        setSelectedSubject(subject)
-        setExamQuestions(questionsData.data)
-        setCurrentView('exam')
-        setCurrentQuestion(0)
-        setExamTimer(3600)
-        setUserAnswers({})
-        setMarkedQuestions(new Set())
-        setIsExamActive(true)
-      } else {
-        alert('載入題目失敗，請稍後再試')
-      }
-    } catch (error) {
-      alert('載入題目失敗：' + error.message)
-      console.error('載入題目錯誤:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+    // 回答題目
+    const answerQuestion = (questionId, answer) => {
+        setAnswers(prev => ({
+            ...prev,
+            [questionId]: answer
+        }));
+        
+        console.log(`答題: 題目${questionId} = ${answer}`);
+    };
 
-  const selectAnswer = (questionId, answer) => {
-    setUserAnswers(prev => ({...prev, [questionId]: answer}))
-  }
+    // 下一題
+    const nextQuestion = () => {
+        if (currentQuestionIndex < questions.length - 1) {
+            setCurrentQuestionIndex(prev => prev + 1);
+        }
+    };
 
-  const toggleMark = (questionId) => {
-    setMarkedQuestions(prev => {
-      const newMarked = new Set(prev)
-      if (newMarked.has(questionId)) {
-        newMarked.delete(questionId)
-      } else {
-        newMarked.add(questionId)
-      }
-      return newMarked
-    })
-  }
+    // 上一題
+    const previousQuestion = () => {
+        if (currentQuestionIndex > 0) {
+            setCurrentQuestionIndex(prev => prev - 1);
+        }
+    };
 
-  const handleAutoSubmit = () => {
-    alert('時間到！系統將自動提交您的答案。')
-    submitExam()
-  }
+    // 跳轉到指定題目
+    const goToQuestion = (index) => {
+        if (index >= 0 && index < questions.length) {
+            setCurrentQuestionIndex(index);
+        }
+    };
 
-  const submitExam = async () => {
-    try {
-      setLoading(true)
-      const correctCount = Object.entries(userAnswers).filter(([questionId, answer]) => {
-        const question = examQuestions.find(q => q.id === parseInt(questionId))
-        return question && question.correct_answer === answer
-      }).length
+    // 提交考試
+    const submitExam = async () => {
+        try {
+            setLoading(true);
+            
+            // 計算分數
+            let correctCount = 0;
+            questions.forEach(question => {
+                const userAnswer = answers[question.id];
+                if (userAnswer === question.correct_answer) {
+                    correctCount++;
+                }
+            });
+            
+            const score = Math.round((correctCount / questions.length) * 100);
+            const examTime = new Date() - examStartTime;
+            
+            console.log('📤 提交考試:', {
+                totalQuestions: questions.length,
+                answeredQuestions: Object.keys(answers).length,
+                correctCount,
+                score
+            });
 
-      const totalScore = Math.round((correctCount / examQuestions.length) * 100)
+            // 提交到後端
+            const result = await apiService.submitExam(
+                currentUser.id,
+                selectedCategory.id,
+                answers,
+                score,
+                questions.length
+            );
 
-      const examData = {
-        userId: currentUser.id,
-        categoryId: selectedSubject.id,
-        answers: userAnswers,
-        score: totalScore
-      }
+            if (result.success) {
+                setExamResult({
+                    score,
+                    correctCount,
+                    totalQuestions: questions.length,
+                    examTime: Math.round(examTime / 1000 / 60), // 分鐘
+                    examId: result.data.exam_id
+                });
+                setExamCompleted(true);
+                
+                // 重新載入歷史記錄
+                await loadExamHistory(currentUser.id);
+                
+                console.log('✅ 考試提交成功');
+            }
+        } catch (error) {
+            console.error('❌ 考試提交失敗:', error);
+            setError('考試提交失敗: ' + error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
 
-      const submitResult = await apiService.submitExam(examData)
+    // 返回首頁
+    const goHome = () => {
+        setCurrentView('home');
+        setSelectedCategory(null);
+        setQuestions([]);
+        setAnswers({});
+        setExamCompleted(false);
+        setExamResult(null);
+        setError('');
+    };
 
-      setIsExamActive(false)
-      setCurrentView('result')
-      setShowSubmitModal(false)
+    // Excel匯入完成回調
+    const handleImportComplete = async (importData) => {
+        console.log('📥 匯入完成:', importData);
+        
+        // 重新載入科目列表（可能有新科目）
+        await loadCategories();
+        
+        // 顯示成功消息
+        alert(`🎉 匯入完成！\n成功: ${importData.success} 題\n失敗: ${importData.error} 題`);
+        
+        // 返回首頁
+        setCurrentView('home');
+    };
 
-      if (submitResult.success) {
-        await loadExamHistory(currentUser.id)
-      }
-    } catch (error) {
-      alert('提交失敗，請稍後再試')
-      console.error('提交錯誤:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // 新增：處理Excel匯入成功後的回調
-  const handleImportSuccess = () => {
-    setShowExcelImport(false)
-    // 重新載入科目資料
-    checkConnectionAndLoadData()
-    alert('Excel題目匯入成功！')
-  }
-
-  const getConnectionStatusDisplay = () => {
-    switch (connectionStatus) {
-      case 'checking':
-        return { text: '檢測中...', color: 'bg-yellow-100 text-yellow-800' }
-      case 'online':
-        return { text: 'MySQL連線', color: 'bg-green-100 text-green-800' }
-      case 'offline':
-        return { text: '離線模式', color: 'bg-red-100 text-red-800' }
-      default:
-        return { text: '未知狀態', color: 'bg-gray-100 text-gray-800' }
-    }
-  }
-
-  // 主頁面渲染 - 添加Excel匯入按鈕
-  if (currentView === 'home') {
-    const statusDisplay = getConnectionStatusDisplay()
-    
-    return (
-      <div>
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-          <nav className="bg-white shadow-sm">
-            <div className="max-w-7xl mx-auto px-4 py-4">
-              <div className="flex justify-between items-center">
-                <div className="flex items-center">
-                  <h1 className="text-2xl font-bold text-gray-900">醫檢師考試系統</h1>
-                  <span className={`ml-2 px-2 py-1 text-xs rounded-full ${statusDisplay.color}`}>
-                    {statusDisplay.text}
-                  </span>
-                  {connectionStatus === 'checking' && (
-                    <div className="ml-2 animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                  )}
+    // 渲染登入界面
+    const renderLogin = () => (
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+            <div className="bg-white rounded-lg shadow-xl p-8 w-full max-w-md">
+                <div className="text-center mb-8">
+                    <h1 className="text-3xl font-bold text-gray-800 mb-2">🏥 醫檢師考試系統</h1>
+                    <p className="text-gray-600">國家考試線上練習平台</p>
                 </div>
-                {isLoggedIn ? (
-                  <div className="flex items-center space-x-4">
-                    <span className="text-gray-700">歡迎，{currentUser?.username}</span>
-                    {/* 新增：管理員Excel匯入按鈕 */}
-                    {isAdmin() && (
-                      <button 
-                        onClick={() => setShowExcelImport(true)} 
-                        className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
-                      >
-                        📊 匯入題目
-                      </button>
+                
+                <div className="space-y-4">
+                    <button
+                        onClick={() => handleLogin()}
+                        disabled={loading}
+                        className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium transition-colors"
+                    >
+                        {loading ? '登入中...' : '🚀 開始練習 (展示模式)'}
+                    </button>
+                    
+                    {error && (
+                        <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+                            {error}
+                        </div>
                     )}
-                    <button onClick={() => setCurrentView('dashboard')} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">進入系統</button>
-                    <button onClick={() => { setIsLoggedIn(false); setCurrentUser(null) }} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">登出</button>
-                  </div>
+                </div>
+                
+                <div className="mt-6 text-center text-sm text-gray-500">
+                    <p>展示帳號：DEMO001</p>
+                    <p>密碼：demo123</p>
+                </div>
+            </div>
+        </div>
+    );
+
+    // 渲染主頁
+    const renderHome = () => (
+        <div className="min-h-screen bg-gray-50">
+            {/* 導航欄 */}
+            <nav className="bg-white shadow-sm border-b">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="flex justify-between items-center h-16">
+                        <div className="flex items-center">
+                            <h1 className="text-xl font-bold text-gray-800">🏥 醫檢師考試系統</h1>
+                        </div>
+                        <div className="flex items-center space-x-4">
+                            <span className="text-gray-600">歡迎，{currentUser?.name}</span>
+                            <button
+                                onClick={() => setCurrentView('history')}
+                                className="px-4 py-2 text-blue-600 hover:bg-blue-50 rounded"
+                            >
+                                📊 考試記錄
+                            </button>
+                            <button
+                                onClick={() => setCurrentView('import')}
+                                className="px-4 py-2 text-green-600 hover:bg-green-50 rounded"
+                            >
+                                📥 匯入題目
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setCurrentUser(null);
+                                    setExamHistory([]);
+                                }}
+                                className="px-4 py-2 text-gray-600 hover:bg-gray-50 rounded"
+                            >
+                                🚪 登出
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </nav>
+
+            {/* 主要內容 */}
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <div className="text-center mb-12">
+                    <h2 className="text-3xl font-bold text-gray-800 mb-4">選擇考試科目</h2>
+                    <p className="text-gray-600">選擇你要練習的醫檢師考試科目</p>
+                </div>
+
+                {/* 科目卡片 */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {categories.map(category => (
+                        <div
+                            key={category.id}
+                            className="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow p-6 cursor-pointer"
+                            onClick={() => startExam(category.id)}
+                        >
+                            <div className="text-center">
+                                <div className="text-4xl mb-4">📚</div>
+                                <h3 className="text-lg font-bold text-gray-800 mb-2">
+                                    {category.name}
+                                </h3>
+                                <p className="text-gray-600 text-sm mb-4">
+                                    {category.description}
+                                </p>
+                                <button className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition-colors">
+                                    開始考試
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                {categories.length === 0 && !loading && (
+                    <div className="text-center py-12">
+                        <div className="text-6xl mb-4">📚</div>
+                        <h3 className="text-xl font-bold text-gray-600 mb-2">暫無考試科目</h3>
+                        <p className="text-gray-500">請聯繫管理員添加考試科目</p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+
+    // 渲染考試界面
+    const renderExam = () => {
+        if (examCompleted && examResult) {
+            return renderExamResult();
+        }
+
+        if (questions.length === 0) {
+            return <div className="min-h-screen flex items-center justify-center">載入題目中...</div>;
+        }
+
+        const currentQuestion = questions[currentQuestionIndex];
+        const userAnswer = answers[currentQuestion.id];
+        const answeredCount = Object.keys(answers).length;
+
+        return (
+            <div className="min-h-screen bg-gray-50">
+                {/* 考試頭部 */}
+                <div className="bg-white shadow-sm border-b">
+                    <div className="max-w-4xl mx-auto px-4 py-4">
+                        <div className="flex justify-between items-center">
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-800">
+                                    {selectedCategory?.name}
+                                </h2>
+                                <p className="text-gray-600">
+                                    第 {currentQuestionIndex + 1} 題 / 共 {questions.length} 題
+                                </p>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-sm text-gray-600">
+                                    已答題：{answeredCount} / {questions.length}
+                                </div>
+                                <div className="flex space-x-2 mt-2">
+                                    <button
+                                        onClick={goHome}
+                                        className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+                                    >
+                                        返回首頁
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            if (confirm('確定要提交考試嗎？未答題目將計為錯誤。')) {
+                                                submitExam();
+                                            }
+                                        }}
+                                        disabled={loading}
+                                        className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                                    >
+                                        {loading ? '提交中...' : '提交考試'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="max-w-4xl mx-auto px-4 py-8">
+                    <div className="bg-white rounded-lg shadow-md p-8">
+                        {/* 題目內容 */}
+                        <div className="mb-8">
+                            <div className="text-lg font-medium text-gray-800 mb-6 leading-relaxed">
+                                {currentQuestion.question}
+                            </div>
+
+                            {/* 選項 */}
+                            <div className="space-y-4">
+                                {['A', 'B', 'C', 'D'].map(option => (
+                                    <label
+                                        key={option}
+                                        className={`block p-4 border-2 rounded-lg cursor-pointer transition-colors ${
+                                            userAnswer === option
+                                                ? 'border-blue-500 bg-blue-50'
+                                                : 'border-gray-200 hover:border-gray-300'
+                                        }`}
+                                    >
+                                        <div className="flex items-start">
+                                            <input
+                                                type="radio"
+                                                name={`question-${currentQuestion.id}`}
+                                                value={option}
+                                                checked={userAnswer === option}
+                                                onChange={() => answerQuestion(currentQuestion.id, option)}
+                                                className="mt-1 mr-3"
+                                            />
+                                            <div>
+                                                <span className="font-medium text-blue-600 mr-2">
+                                                    {option}.
+                                                </span>
+                                                <span className="text-gray-800">
+                                                    {currentQuestion[`option_${option.toLowerCase()}`]}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 導航按鈕 */}
+                        <div className="flex justify-between items-center">
+                            <button
+                                onClick={previousQuestion}
+                                disabled={currentQuestionIndex === 0}
+                                className="px-6 py-3 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                ← 上一題
+                            </button>
+
+                            <div className="text-center">
+                                <div className="text-sm text-gray-600 mb-2">快速導航</div>
+                                <div className="flex space-x-1">
+                                    {questions.slice(0, 10).map((_, index) => (
+                                        <button
+                                            key={index}
+                                            onClick={() => goToQuestion(index)}
+                                            className={`w-8 h-8 text-xs rounded ${
+                                                index === currentQuestionIndex
+                                                    ? 'bg-blue-600 text-white'
+                                                    : answers[questions[index].id]
+                                                    ? 'bg-green-100 text-green-800'
+                                                    : 'bg-gray-100 text-gray-600'
+                                            } hover:bg-blue-100`}
+                                        >
+                                            {index + 1}
+                                        </button>
+                                    ))}
+                                    {questions.length > 10 && (
+                                        <span className="text-gray-500">...</span>
+                                    )}
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={nextQuestion}
+                                disabled={currentQuestionIndex === questions.length - 1}
+                                className="px-6 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                下一題 →
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    // 渲染考試結果
+    const renderExamResult = () => (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-lg shadow-xl p-8 max-w-2xl w-full">
+                <div className="text-center">
+                    <div className="text-6xl mb-6">
+                        {examResult.score >= 80 ? '🎉' : examResult.score >= 60 ? '👍' : '📚'}
+                    </div>
+                    <h2 className="text-3xl font-bold text-gray-800 mb-4">考試完成！</h2>
+                    
+                    <div className="grid grid-cols-2 gap-6 my-8">
+                        <div className="bg-blue-50 p-4 rounded-lg">
+                            <div className="text-3xl font-bold text-blue-600">{examResult.score}</div>
+                            <div className="text-sm text-gray-600">分數</div>
+                        </div>
+                        <div className="bg-green-50 p-4 rounded-lg">
+                            <div className="text-3xl font-bold text-green-600">
+                                {examResult.correctCount}/{examResult.totalQuestions}
+                            </div>
+                            <div className="text-sm text-gray-600">正確題數</div>
+                        </div>
+                    </div>
+
+                    <div className="mb-8">
+                        <div className="text-gray-600">
+                            考試科目：{selectedCategory?.name}
+                        </div>
+                        <div className="text-gray-600">
+                            考試時間：{examResult.examTime} 分鐘
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        <button
+                            onClick={() => startExam(selectedCategory.id)}
+                            className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700"
+                        >
+                            🔄 重新考試
+                        </button>
+                        <button
+                            onClick={goHome}
+                            className="w-full bg-gray-600 text-white py-3 px-6 rounded-lg hover:bg-gray-700"
+                        >
+                            🏠 返回首頁
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+
+    // 渲染歷史記錄
+    const renderHistory = () => (
+        <div className="min-h-screen bg-gray-50">
+            <div className="max-w-6xl mx-auto px-4 py-8">
+                <div className="flex justify-between items-center mb-8">
+                    <h2 className="text-3xl font-bold text-gray-800">📊 考試歷史記錄</h2>
+                    <button
+                        onClick={goHome}
+                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                        返回首頁
+                    </button>
+                </div>
+
+                {examHistory.length > 0 ? (
+                    <div className="bg-white rounded-lg shadow-md overflow-hidden">
+                        <table className="min-w-full">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">日期</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">科目</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">分數</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">題數</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                                {examHistory.map(record => (
+                                    <tr key={record.id} className="hover:bg-gray-50">
+                                        <td className="px-6 py-4 whitespace-nowrap text-gray-800">
+                                            {new Date(record.exam_date).toLocaleString()}
+                                        </td>
+                                        <td className="px-6 py-4 text-gray-800">
+                                            {record.category_name}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                                record.score >= 80 ? 'bg-green-100 text-green-800' :
+                                                record.score >= 60 ? 'bg-yellow-100 text-yellow-800' :
+                                                'bg-red-100 text-red-800'
+                                            }`}>
+                                                {record.score} 分
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-gray-800">
+                                            {record.total_questions || 20} 題
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 ) : (
-                  <div className="flex items-center space-x-2">
-                    <button onClick={() => setShowLoginModal(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">登入系統</button>
-                    <button 
-                      onClick={() => {
-                        console.log('調試狀態:', { currentView, isLoggedIn, currentUser })
-                        alert(`狀態: ${currentView}, 登入: ${isLoggedIn}, 用戶: ${currentUser?.username || '無'}`)
-                      }}
-                      className="px-2 py-1 bg-gray-200 text-gray-600 rounded text-xs hover:bg-gray-300"
-                    >
-                      🐛
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </nav>
-
-          <main className="max-w-7xl mx-auto py-12 px-4">
-            <div className="text-center mb-12">
-              <h2 className="text-4xl font-bold text-gray-900 mb-4">醫事檢驗師國家考試線上練習系統</h2>
-              <p className="text-xl text-gray-600 mb-8">
-                {connectionStatus === 'online' ? '連接MySQL資料庫，提供真實考試體驗' : 
-                 connectionStatus === 'offline' ? '目前為離線模式，使用模擬題目' : 
-                 '正在連接資料庫...'}
-              </p>
-              <div className="flex justify-center space-x-4">
-                {isLoggedIn ? (
-                  <>
-                    <button onClick={() => setCurrentView('dashboard')} className="bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-blue-700">進入考試系統</button>
-                    <button 
-                      onClick={() => {
-                        console.log('強制跳轉Dashboard')
-                        setCurrentView('dashboard')
-                      }}
-                      className="bg-green-600 text-white px-4 py-3 rounded-lg font-semibold hover:bg-green-700"
-                    >
-                      強制進入Dashboard
-                    </button>
-                  </>
-                ) : (
-                  <button onClick={() => setShowLoginModal(true)} className="bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-blue-700">登入開始練習</button>
-                )}
-              </div>
-            </div>
-
-            {loading && connectionStatus === 'checking' ? (
-              <div className="text-center py-8">
-                <div className="inline-flex items-center space-x-3">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                  <span className="text-gray-600">正在連接MySQL資料庫...</span>
-                </div>
-              </div>
-            ) : (
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
-                {subjects.map(subject => (
-                  <div key={subject.id} className="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow">
-                    <h3 className="text-lg font-bold text-gray-900 mb-2">{subject.name}</h3>
-                    <p className="text-gray-600 mb-4 text-sm">{subject.description}</p>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-blue-600 font-semibold">
-                        {connectionStatus === 'online' ? '題庫練習' : '模擬練習'} • 60分鐘
-                      </span>
-                      <button
-                        onClick={() => handleSubjectClick(subject.id)}
-                        className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm"
-                      >
-                        {isLoggedIn ? '開始考試' : '登入考試'}
-                      </button>
+                    <div className="text-center py-12">
+                        <div className="text-6xl mb-4">📊</div>
+                        <h3 className="text-xl font-bold text-gray-600 mb-2">暫無考試記錄</h3>
+                        <p className="text-gray-500">開始你的第一次考試吧！</p>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="bg-white rounded-lg shadow-lg p-8 text-center">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">系統特色</h2>
-              <div className="grid md:grid-cols-3 gap-8">
-                <div>
-                  <div className="text-4xl mb-2">🔗</div>
-                  <h3 className="text-lg font-semibold mb-2">自動連線</h3>
-                  <p className="text-gray-600">自動嘗試連接MySQL，失敗時切換離線模式</p>
-                </div>
-                <div>
-                  <div className="text-4xl mb-2">⏱️</div>
-                  <h3 className="text-lg font-semibold mb-2">真實考試體驗</h3>
-                  <p className="text-gray-600">60分鐘限時作答，完全模擬考場環境</p>
-                </div>
-                <div>
-                  <div className="text-4xl mb-2">📚</div>
-                  <h3 className="text-lg font-semibold mb-2">完整題庫</h3>
-                  <p className="text-gray-600">六大科目，涵蓋考試重點</p>
-                </div>
-              </div>
-              
-              {/* 新增：管理員專區 */}
-              {isLoggedIn && isAdmin() && (
-                <div className="mt-8 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <h3 className="text-lg font-semibold text-yellow-800 mb-2">🔧 管理員專區</h3>
-                  <div className="flex justify-center space-x-4">
-                    <button 
-                      onClick={() => setShowExcelImport(true)}
-                      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-                    >
-                      📊 Excel題目匯入
-                    </button>
-                    <button 
-                      onClick={() => alert('題目管理功能開發中...')}
-                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
-                    >
-                      📝 題目管理
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </main>
-        </div>
-
-        {/* Excel匯入彈窗 */}
-        {showExcelImport && (
-          <ExcelImport 
-            apiService={apiService}
-            onClose={() => setShowExcelImport(false)}
-            onSuccess={handleImportSuccess}
-          />
-        )}
-
-        {/* 原有的登入彈窗等保持不變... */}
-        {showLoginModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">
-                {selectedSubject ? `開始「${selectedSubject.name}」考試` : '系統登入'}
-              </h3>
-              {error && <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded mb-4">{error}</div>}
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">學號</label>
-                  <input
-                    type="text"
-                    value={loginData.username}
-                    onChange={(e) => setLoginData({...loginData, username: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">密碼</label>
-                  <input
-                    type="password"
-                    value={loginData.password}
-                    onChange={(e) => setLoginData({...loginData, password: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                  <p className="text-sm text-blue-800">展示帳號：學號 DEMO001，密碼 demo123</p>
-                  <p className="text-xs text-blue-600 mt-1">
-                    目前狀態：{getConnectionStatusDisplay().text}
-                  </p>
-                  <p className="text-xs text-green-600 mt-1">
-                    💡 DEMO001 擁有管理員權限，可使用Excel匯入功能
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={() => { setShowLoginModal(false); setSelectedSubject(null); setError('') }}
-                  className="flex-1 py-2 px-4 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleLogin}
-                  disabled={loading}
-                  className="flex-1 py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {loading ? '登入中...' : (selectedSubject ? '登入並開始考試' : '登入')}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {loading && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6">
-              <div className="flex items-center space-x-3">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                <span>處理中...</span>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  if (currentView === 'dashboard') {
-    const bestScore = examHistory.length > 0 ? Math.max(...examHistory.map(h => h.score)) : 0
-    const avgScore = examHistory.length > 0 ? (examHistory.reduce((sum, h) => sum + h.score, 0) / examHistory.length).toFixed(1) : 0
-    const statusDisplay = getConnectionStatusDisplay()
-
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <nav className="bg-white shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 py-4">
-            <div className="flex justify-between items-center">
-              <div className="flex items-center">
-                <h1 className="text-xl font-bold text-gray-900">醫檢師考試系統</h1>
-                <span className={`ml-2 px-2 py-1 text-xs rounded-full ${statusDisplay.color}`}>
-                  {statusDisplay.text}
-                </span>
-              </div>
-              <div className="flex items-center space-x-4">
-                <span className="text-gray-700">歡迎，{currentUser?.username}</span>
-                {/* Dashboard中也添加Excel匯入按鈕 */}
-                {isAdmin() && (
-                  <button 
-                    onClick={() => setShowExcelImport(true)} 
-                    className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
-                  >
-                    📊 匯入題目
-                  </button>
                 )}
-                <button onClick={() => setCurrentView('home')} className="text-blue-600 hover:text-blue-700">返回首頁</button>
-                <button 
-                  onClick={() => {
-                    console.log('Dashboard狀態:', { currentView, isLoggedIn, currentUser, examHistory })
-                    alert(`Dashboard狀態正常 - 用戶: ${currentUser?.username}`)
-                  }}
-                  className="px-2 py-1 bg-gray-200 text-gray-600 rounded text-xs hover:bg-gray-300"
-                >
-                  🐛
-                </button>
-                <button onClick={() => { setIsLoggedIn(false); setCurrentUser(null); setCurrentView('home') }} className="text-gray-500 hover:text-gray-700">登出</button>
-              </div>
             </div>
-          </div>
-        </nav>
+        </div>
+    );
 
-        <div className="max-w-7xl mx-auto py-8 px-4">
-          <div className="grid lg:grid-cols-4 gap-6 mb-8">
-            <div className="bg-white rounded-lg shadow p-6">
-              <h4 className="text-sm text-gray-600">最佳成績</h4>
-              <p className="text-2xl font-bold text-yellow-600">{bestScore}</p>
+    // 渲染匯入界面
+    const renderImport = () => (
+        <div className="min-h-screen bg-gray-50">
+            <div className="max-w-6xl mx-auto px-4 py-8">
+                <ExcelImport
+                    onImportComplete={handleImportComplete}
+                    onClose={() => setCurrentView('home')}
+                />
             </div>
-            <div className="bg-white rounded-lg shadow p-6">
-              <h4 className="text-sm text-gray-600">平均分數</h4>
-              <p className="text-2xl font-bold text-blue-600">{avgScore}</p>
-            </div>
-            <div className="bg-white rounded-lg shadow p-6">
-              <h4 className="text-sm text-gray-600">考試次數</h4>
-              <p className="text-2xl font-bold text-green-600">{examHistory.length}</p>
-            </div>
-            <div className="bg-white rounded-lg shadow p-6">
-              <h4 className="text-sm text-gray-600">學習狀態</h4>
-              <p className="text-2xl font-bold text-purple-600">{examHistory.length > 0 ? '活躍' : '新手'}</p>
-            </div>
-          </div>
+        </div>
+    );
 
-          <div className="bg-white rounded-lg shadow p-6 mb-8">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-lg font-semibold text-gray-900">選擇考試科目</h2>
-              {/* 管理員快捷操作 */}
-              {isAdmin() && (
-                <div className="flex space-x-2">
-                  <button 
-                    onClick={() => setShowExcelImport(true)}
-                    className="px-3 py-1 bg-green-100 text-green-700 rounded text-sm hover:bg-green-200"
-                  >
-                    📊 匯入題目
-                  </button>
+    // 載入中界面
+    if (loading && !currentUser) {
+        return (
+            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                <div className="text-center">
+                    <div className="text-6xl mb-4">🔄</div>
+                    <div className="text-xl font-medium text-gray-700">系統載入中...</div>
+                    <div className="text-gray-500 mt-2">正在初始化考試系統</div>
                 </div>
-              )}
             </div>
-            {loading ? (
-              <div className="text-center py-8">
-                <div className="text-gray-600">載入中...</div>
-              </div>
-            ) : (
-              <div className="grid md:grid-cols-2 gap-4">
-                {subjects.map(subject => (
-                  <div key={subject.id} className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors">
-                    <h3 className="font-semibold text-gray-900 mb-2">{subject.name}</h3>
-                    <p className="text-sm text-gray-600 mb-4">{subject.description}</p>
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-gray-500">
-                        {connectionStatus === 'online' ? '題庫練習' : '模擬練習'} • 60分鐘
-                      </span>
-                      <button onClick={() => startExam(subject.id)} disabled={loading} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50">開始考試</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        );
+    }
 
-          {examHistory.length > 0 && (
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-6">考試記錄</h2>
-              <div className="space-y-3">
-                {examHistory.slice(0, 5).map((record, index) => {
-                  const subject = subjects.find(s => s.id === record.category_id)
-                  return (
-                    <div key={index} className="flex justify-between items-center py-2 border-b border-gray-100">
-                      <div>
-                        <div className="font-medium">{subject?.name || '未知科目'}</div>
-                        <div className="text-sm text-gray-500">{new Date(record.exam_date).toLocaleDateString()}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className={`font-semibold ${record.score >= 80 ? 'text-green-600' : record.score >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>{record.score}分</div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-        </div>
+    // 主要渲染邏輯
+    if (!currentUser) {
+        return renderLogin();
+    }
 
-        {/* Dashboard中的Excel匯入彈窗 */}
-        {showExcelImport && (
-          <ExcelImport 
-            apiService={apiService}
-            onClose={() => setShowExcelImport(false)}
-            onSuccess={handleImportSuccess}
-          />
-        )}
-      </div>
-    )
-  }
+    switch (currentView) {
+        case 'exam':
+            return renderExam();
+        case 'history':
+            return renderHistory();
+        case 'import':
+            return renderImport();
+        default:
+            return renderHome();
+    }
+};
 
-  // 其他視圖(exam, result)保持不變...
-  // [其餘代碼保持原樣，包括考試視圖和結果視圖]
-
-  // 默認返回首頁
-  return (
-    <div>
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900 mb-4">系統載入中...</h1>
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-export default App
+export default App;

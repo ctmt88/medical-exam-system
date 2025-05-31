@@ -1,448 +1,423 @@
-import React, { useState } from 'react'
-import * as XLSX from 'xlsx'
+/**
+ * Excel匯入組件
+ * 檔案名稱: ExcelImport.jsx
+ * 處理Excel文件上傳、解析和題目匯入
+ */
 
-const ExcelImport = ({ apiService, onClose, onSuccess }) => {
-  const [file, setFile] = useState(null)
-  const [uploading, setUploading] = useState(false)
-  const [preview, setPreview] = useState([])
-  const [validationErrors, setValidationErrors] = useState([])
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [uploadResults, setUploadResults] = useState(null)
-  const [debugInfo, setDebugInfo] = useState(null) // 新增調試資訊
+import React, { useState, useCallback } from 'react';
+import * as XLSX from 'xlsx';
+import apiService from './ApiService';
 
-  const expectedColumns = [
-    '題號', '年份', '學期', '科目', '主題分類', '題目內容',
-    '選項A', '選項B', '選項C', '選項D', '正確答案', '詳解'
-  ]
+const ExcelImport = ({ onImportComplete, onClose }) => {
+    const [file, setFile] = useState(null);
+    const [parsing, setParsing] = useState(false);
+    const [importing, setImporting] = useState(false);
+    const [previewData, setPreviewData] = useState([]);
+    const [importResult, setImportResult] = useState(null);
+    const [error, setError] = useState('');
 
-  const subjectMapping = {
-    '臨床生理學與病理學': 1,
-    '臨床血液學與血庫學': 2,
-    '醫學分子檢驗學與臨床鏡檢學': 3,
-    '微生物學與臨床微生物學': 4,
-    '生物化學與臨床生化學': 5,
-    '臨床血清免疫學與臨床病毒學': 6
-  }
+    /**
+     * 處理文件選擇
+     */
+    const handleFileSelect = useCallback((event) => {
+        const selectedFile = event.target.files[0];
+        if (!selectedFile) return;
 
-  // 新增：民國年轉西元年函數
-  const convertYear = (year) => {
-    const yearNum = parseInt(year)
-    if (yearNum < 200) { // 假設小於200的是民國年
-      return yearNum + 1911
-    }
-    return yearNum
-  }
-
-  // 新增：清理欄位名稱（移除空格、特殊字符）
-  const cleanColumnName = (name) => {
-    return name?.toString().trim().replace(/[\s\u00A0]/g, '') || ''
-  }
-
-  const handleFileSelect = (event) => {
-    const selectedFile = event.target.files[0]
-    if (selectedFile) {
-      setFile(selectedFile)
-      parseExcelFile(selectedFile)
-    }
-  }
-
-  const parseExcelFile = (file) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target.result)
-        const workbook = XLSX.read(data, { type: 'array' })
-        const sheetName = workbook.SheetNames[0]
-        const worksheet = workbook.Sheets[sheetName]
-        const jsonData = XLSX.utils.sheet_to_json(worksheet)
-
-        console.log('解析的Excel資料:', jsonData)
-        
-        if (jsonData.length === 0) {
-          alert('Excel檔案是空的或格式不正確')
-          return
+        if (!selectedFile.name.match(/\.(xlsx|xls)$/)) {
+            setError('請選擇有效的Excel文件 (.xlsx 或 .xls)');
+            return;
         }
 
-        // 調試：檢查實際的欄位名稱
-        const firstRow = jsonData[0]
-        const actualColumns = Object.keys(firstRow)
-        const cleanedActualColumns = actualColumns.map(cleanColumnName)
-        
-        // 設置調試資訊
-        setDebugInfo({
-          actualColumns: actualColumns,
-          cleanedColumns: cleanedActualColumns,
-          expectedColumns: expectedColumns,
-          firstRowData: firstRow
-        })
+        setFile(selectedFile);
+        setError('');
+        setPreviewData([]);
+        setImportResult(null);
+    }, []);
 
-        console.log('實際欄位:', actualColumns)
-        console.log('清理後欄位:', cleanedActualColumns)
-        console.log('期望欄位:', expectedColumns)
+    /**
+     * 解析Excel文件
+     */
+    const parseExcelFile = useCallback(async () => {
+        if (!file) return;
 
-        // 改進的欄位驗證 - 使用清理後的欄位名稱
-        const missingColumns = expectedColumns.filter(expectedCol => {
-          const cleanExpected = cleanColumnName(expectedCol)
-          return !cleanedActualColumns.includes(cleanExpected)
-        })
-        
-        if (missingColumns.length > 0) {
-          alert(`缺少必要欄位: ${missingColumns.join(', ')}\n\n實際欄位: ${actualColumns.join(', ')}`)
-          return
-        }
+        setParsing(true);
+        setError('');
 
-        // 資料驗證和預處理
-        const processedData = validateAndProcessData(jsonData)
-        setPreview(processedData.slice(0, 10)) // 只顯示前10筆預覽
-        
-      } catch (error) {
-        console.error('解析Excel失敗:', error)
-        alert('Excel檔案格式錯誤: ' + error.message)
-      }
-    }
-    reader.readAsArrayBuffer(file)
-  }
+        try {
+            const buffer = await file.arrayBuffer();
+            const workbook = XLSX.read(buffer, { 
+                type: 'buffer',
+                cellText: false,
+                cellDates: true
+            });
 
-  const validateAndProcessData = (data) => {
-    const errors = []
-    const processedData = []
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            
+            // 轉換為JSON，保留原始格式
+            const rawData = XLSX.utils.sheet_to_json(worksheet, { 
+                header: 1,
+                defval: '',
+                blankrows: false
+            });
 
-    data.forEach((row, index) => {
-      const rowNumber = index + 2 // Excel從第2行開始(第1行是標題)
-      
-      try {
-        // 改進的資料提取 - 處理可能的欄位名稱變化
-        const getFieldValue = (fieldName) => {
-          // 直接匹配
-          if (row[fieldName] !== undefined) return row[fieldName]
-          
-          // 清理後匹配
-          const cleanField = cleanColumnName(fieldName)
-          for (const key of Object.keys(row)) {
-            if (cleanColumnName(key) === cleanField) {
-              return row[key]
+            if (rawData.length < 2) {
+                throw new Error('Excel文件必須包含標題行和至少一行數據');
             }
-          }
-          return undefined
+
+            // 獲取標題行
+            const headers = rawData[0];
+            console.log('Excel標題行:', headers);
+
+            // 處理數據行
+            const dataRows = rawData.slice(1).filter(row => 
+                row.some(cell => cell !== null && cell !== undefined && cell !== '')
+            );
+
+            // 智能映射欄位
+            const mappedData = dataRows.map((row, index) => {
+                const mappedRow = mapExcelRowToQuestion(headers, row, index);
+                return mappedRow;
+            }).filter(row => row !== null);
+
+            if (mappedData.length === 0) {
+                throw new Error('沒有找到有效的題目數據');
+            }
+
+            console.log('解析成功，題目數量:', mappedData.length);
+            console.log('第一題範例:', mappedData[0]);
+
+            setPreviewData(mappedData);
+
+        } catch (error) {
+            console.error('Excel解析錯誤:', error);
+            setError(`Excel解析失敗: ${error.message}`);
+        } finally {
+            setParsing(false);
         }
+    }, [file]);
 
-        const questionNumber = getFieldValue('題號')
-        const year = getFieldValue('年份')
-        const semester = getFieldValue('學期')
-        const subject = getFieldValue('科目')
-        const subCategory = getFieldValue('主題分類')
-        const question = getFieldValue('題目內容')
-        const optionA = getFieldValue('選項A')
-        const optionB = getFieldValue('選項B')
-        const optionC = getFieldValue('選項C')
-        const optionD = getFieldValue('選項D')
-        const correctAnswer = getFieldValue('正確答案')
-        const explanation = getFieldValue('詳解')
+    /**
+     * 智能映射Excel行到題目格式
+     */
+    const mapExcelRowToQuestion = (headers, row, index) => {
+        try {
+            // 創建標題到索引的映射
+            const headerMap = {};
+            headers.forEach((header, idx) => {
+                if (header) {
+                    const normalizedHeader = header.toString().toLowerCase().trim();
+                    headerMap[normalizedHeader] = idx;
+                }
+            });
 
-        // 驗證必要欄位
-        if (!questionNumber || !subject || !question) {
-          errors.push(`第${rowNumber}行：缺少必要欄位 (題號: ${questionNumber}, 科目: ${subject}, 題目: ${question ? '有' : '無'})`)
-          return
-        }
+            // 輔助函數：根據多個可能的欄位名稱查找值
+            const findValue = (possibleNames) => {
+                for (const name of possibleNames) {
+                    const idx = headerMap[name.toLowerCase()];
+                    if (idx !== undefined && row[idx] !== undefined && row[idx] !== '') {
+                        return row[idx].toString().trim();
+                    }
+                }
+                return '';
+            };
 
-        // 改進的科目驗證 - 清理科目名稱
-        const cleanSubject = subject?.toString().trim()
-        if (!subjectMapping[cleanSubject]) {
-          errors.push(`第${rowNumber}行：科目「${cleanSubject}」不存在。可用科目: ${Object.keys(subjectMapping).join(', ')}`)
-          return
-        }
-
-        // 改進的正確答案驗證 - 處理可能的大小寫和空格
-        const cleanAnswer = correctAnswer?.toString().trim().toUpperCase()
-        if (!['A', 'B', 'C', 'D'].includes(cleanAnswer)) {
-          errors.push(`第${rowNumber}行：正確答案「${correctAnswer}」必須是 A、B、C、D 其中之一`)
-          return
-        }
-
-        // 處理資料
-        const processedRow = {
-          questionNumber: parseInt(questionNumber),
-          year: convertYear(year || new Date().getFullYear()), // 使用轉換函數
-          semester: parseInt(semester) || 1,
-          categoryId: subjectMapping[cleanSubject],
-          subCategory: subCategory?.toString().trim() || '',
-          question: question?.toString().trim() || '',
-          optionA: optionA?.toString().trim() || '',
-          optionB: optionB?.toString().trim() || '',
-          optionC: optionC?.toString().trim() || '',
-          optionD: optionD?.toString().trim() || '',
-          correctAnswer: cleanAnswer,
-          explanation: explanation?.toString().trim() || '',
-          originalRow: rowNumber
-        }
-
-        processedData.push(processedRow)
-        
-      } catch (error) {
-        errors.push(`第${rowNumber}行：處理錯誤 - ${error.message}`)
-      }
-    })
-
-    setValidationErrors(errors)
-    console.log('處理後的資料:', processedData)
-    return processedData
-  }
-
-  const uploadToDatabase = async () => {
-    if (validationErrors.length > 0) {
-      alert('請先修正驗證錯誤')
-      return
-    }
-
-    setUploading(true)
-    setUploadProgress(0)
-    
-    try {
-      // 重新處理所有資料
-      const rawData = XLSX.utils.sheet_to_json(
-        XLSX.read(await file.arrayBuffer(), { type: 'array' }).Sheets[
-          XLSX.read(await file.arrayBuffer(), { type: 'array' }).SheetNames[0]
-        ]
-      )
-      
-      const allData = validateAndProcessData(rawData)
-
-      console.log('準備上傳的資料:', allData)
-
-      // 使用新的批量匯入API（POST方式更安全）
-      const result = await apiService.batchImportQuestions(allData, 50)
-      
-      // 模擬進度更新
-      const progressInterval = setInterval(() => {
-        setUploadProgress(prev => Math.min(prev + 10, 90))
-      }, 200)
-      
-      // 等待實際結果
-      setTimeout(() => {
-        clearInterval(progressInterval)
-        setUploadProgress(100)
-        
-        setUploadResults({
-          total: result.data?.total || allData.length,
-          success: result.data?.success || 0,
-          error: result.data?.error || 0,
-          errors: result.data?.errors || []
-        })
-
-        if (onSuccess && result.success) {
-          onSuccess()
-        }
-      }, 1000)
-
-    } catch (error) {
-      console.error('上傳失敗:', error)
-      alert('上傳失敗：' + error.message)
-      setUploadResults({
-        total: 0,
-        success: 0,
-        error: 1,
-        errors: [error.message]
-      })
-    } finally {
-      setTimeout(() => setUploading(false), 1500)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold text-gray-900">Excel題目匯入</h2>
-            <button
-              onClick={onClose}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              ✕
-            </button>
-          </div>
-
-          {/* 檔案上傳區域 */}
-          <div className="mb-6">
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-              <input
-                type="file"
-                accept=".xlsx,.xls"
-                onChange={handleFileSelect}
-                className="hidden"
-                id="excel-upload"
-              />
-              <label
-                htmlFor="excel-upload"
-                className="cursor-pointer flex flex-col items-center"
-              >
-                <div className="text-4xl mb-2">📊</div>
-                <div className="text-lg font-semibold text-gray-700 mb-2">
-                  點擊選擇Excel檔案
-                </div>
-                <div className="text-sm text-gray-500">
-                  支援 .xlsx 和 .xls 格式，自動處理民國年轉換
-                </div>
-              </label>
-            </div>
+            // 映射基本信息
+            const questionNumber = findValue(['題號', '序號', '編號', 'number', 'no']) || (index + 1);
+            const year = findValue(['年份', 'year', '年度']) || 2015;
+            const semester = findValue(['學期', 'semester']) || 1;
             
-            {file && (
-              <div className="mt-3 text-sm text-gray-600">
-                已選擇: {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
-              </div>
-            )}
-          </div>
+            // 映射科目ID（預設為6 - 臨床血清免疫學）
+            let categoryId = 6;
+            const categoryName = findValue(['科目', 'category', '類別', '分類']);
+            if (categoryName) {
+                // 根據科目名稱推測ID
+                if (categoryName.includes('生理') || categoryName.includes('病理')) categoryId = 1;
+                else if (categoryName.includes('血液') || categoryName.includes('血庫')) categoryId = 2;
+                else if (categoryName.includes('分子') || categoryName.includes('鏡檢')) categoryId = 3;
+                else if (categoryName.includes('微生物')) categoryId = 4;
+                else if (categoryName.includes('生化')) categoryId = 5;
+                else if (categoryName.includes('血清') || categoryName.includes('免疫') || categoryName.includes('病毒')) categoryId = 6;
+            }
 
-          {/* 調試資訊顯示 */}
-          {debugInfo && (
-            <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-              <h3 className="font-semibold text-yellow-900 mb-2">🔍 檔案分析結果：</h3>
-              <div className="text-sm text-yellow-800">
-                <p><strong>實際欄位:</strong> {debugInfo.actualColumns.join(', ')}</p>
-                <p><strong>期望欄位:</strong> {debugInfo.expectedColumns.join(', ')}</p>
-                <p><strong>第一行資料範例:</strong></p>
-                <div className="bg-yellow-100 p-2 rounded mt-1 font-mono text-xs">
-                  {JSON.stringify(debugInfo.firstRowData, null, 2)}
-                </div>
-              </div>
-            </div>
-          )}
+            // 映射題目內容
+            const question = findValue(['題目', 'question', '問題', '內容', '題幹']);
+            if (!question) {
+                console.warn(`第${index + 1}行缺少題目內容`);
+                return null;
+            }
 
-          {/* Excel格式說明 */}
-          <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <h3 className="font-semibold text-blue-900 mb-2">✅ 系統支援格式：</h3>
-            <div className="text-sm text-blue-800">
-              <p className="mb-2">✅ 支援民國年自動轉換（如104年→2015年）</p>
-              <p className="mb-2">✅ 支援主題分類前綴（如"A. 基礎免疫學"）</p>
-              <p className="mb-2">✅ 支援選項中的特殊字符和數字</p>
-              <div className="grid grid-cols-2 gap-2 mt-2">
-                {expectedColumns.map(col => (
-                  <span key={col} className="bg-blue-100 px-2 py-1 rounded text-xs">
-                    {col}
-                  </span>
-                ))}
-              </div>
-              <p className="mt-2 text-xs">
-                • 正確答案支援 A、B、C、D（自動處理大小寫）<br/>
-                • 科目名稱：{Object.keys(subjectMapping).join('、')}<br/>
-                • 第一行必須是標題行，資料從第二行開始
-              </p>
-            </div>
-          </div>
+            // 映射選項
+            const optionA = findValue(['選項a', 'option a', 'a', '(a)', 'a.', '選項1']) || '';
+            const optionB = findValue(['選項b', 'option b', 'b', '(b)', 'b.', '選項2']) || '';
+            const optionC = findValue(['選項c', 'option c', 'c', '(c)', 'c.', '選項3']) || '';
+            const optionD = findValue(['選項d', 'option d', 'd', '(d)', 'd.', '選項4']) || '';
 
-          {/* 驗證錯誤顯示 */}
-          {validationErrors.length > 0 && (
-            <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
-              <h3 className="font-semibold text-red-900 mb-2">
-                ❌ 發現 {validationErrors.length} 個錯誤：
-              </h3>
-              <div className="max-h-32 overflow-y-auto">
-                {validationErrors.map((error, index) => (
-                  <div key={index} className="text-sm text-red-700 mb-1">
-                    • {error}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+            // 映射正確答案
+            let correctAnswer = findValue(['答案', 'answer', '正確答案', '解答']).toUpperCase();
+            if (!['A', 'B', 'C', 'D'].includes(correctAnswer)) {
+                console.warn(`第${index + 1}行答案格式錯誤: ${correctAnswer}，使用預設值A`);
+                correctAnswer = 'A';
+            }
 
-          {/* 資料預覽 */}
-          {preview.length > 0 && (
-            <div className="mb-6">
-              <h3 className="font-semibold text-gray-900 mb-3">
-                📋 資料預覽 (前10筆)：
-              </h3>
-              <div className="overflow-x-auto">
-                <table className="min-w-full bg-white border border-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">題號</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">年份</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">科目</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">題目</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">答案</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.map((row, index) => (
-                      <tr key={index} className="border-b border-gray-200">
-                        <td className="px-3 py-2 text-sm">{row.questionNumber}</td>
-                        <td className="px-3 py-2 text-sm">{row.year}</td>
-                        <td className="px-3 py-2 text-sm">
-                          {Object.keys(subjectMapping).find(key => subjectMapping[key] === row.categoryId)}
-                        </td>
-                        <td className="px-3 py-2 text-sm max-w-xs truncate">
-                          {row.question}
-                        </td>
-                        <td className="px-3 py-2 text-sm font-medium">{row.correctAnswer}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+            // 映射解釋
+            const explanation = findValue(['解釋', 'explanation', '說明', '解析']) || '';
 
-          {/* 上傳進度 */}
-          {uploading && (
-            <div className="mb-6">
-              <div className="flex justify-between text-sm text-gray-600 mb-2">
-                <span>上傳進度</span>
-                <span>{uploadProgress}%</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${uploadProgress}%` }}
-                ></div>
-              </div>
-            </div>
-          )}
+            return {
+                questionNumber: parseInt(questionNumber) || (index + 1),
+                year: parseInt(year) || 2015,
+                semester: parseInt(semester) || 1,
+                categoryId: categoryId,
+                subCategory: categoryName || '臨床血清免疫學與臨床病毒學',
+                question: question,
+                optionA: optionA,
+                optionB: optionB,
+                optionC: optionC,
+                optionD: optionD,
+                correctAnswer: correctAnswer,
+                explanation: explanation,
+                difficulty: 'medium'
+            };
 
-          {/* 上傳結果 */}
-          {uploadResults && (
-            <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
-              <h3 className="font-semibold text-green-900 mb-2">🎉 上傳完成！</h3>
-              <div className="text-sm text-green-800">
-                <p>總計: {uploadResults.total} 題</p>
-                <p>成功: {uploadResults.success} 題</p>
-                <p>失敗: {uploadResults.error} 題</p>
-                
-                {uploadResults.errors.length > 0 && (
-                  <div className="mt-2">
-                    <p className="font-medium">錯誤詳情:</p>
-                    {uploadResults.errors.map((error, index) => (
-                      <div key={index} className="text-xs ml-2">• {error}</div>
-                    ))}
-                  </div>
+        } catch (error) {
+            console.error(`處理第${index + 1}行時發生錯誤:`, error);
+            return null;
+        }
+    };
+
+    /**
+     * 執行匯入
+     */
+    const handleImport = useCallback(async () => {
+        if (previewData.length === 0) {
+            setError('沒有可匯入的數據，請先解析Excel文件');
+            return;
+        }
+
+        setImporting(true);
+        setError('');
+
+        try {
+            console.log('開始匯入題目...', previewData.length, '題');
+            
+            const result = await apiService.importQuestions(previewData, 'excel');
+            
+            console.log('匯入結果:', result);
+            setImportResult(result.data);
+            
+            // 通知父組件匯入完成
+            if (onImportComplete) {
+                onImportComplete(result.data);
+            }
+
+        } catch (error) {
+            console.error('匯入失敗:', error);
+            setError(`匯入失敗: ${error.message}`);
+        } finally {
+            setImporting(false);
+        }
+    }, [previewData, onImportComplete]);
+
+    /**
+     * 重置狀態
+     */
+    const resetState = useCallback(() => {
+        setFile(null);
+        setPreviewData([]);
+        setImportResult(null);
+        setError('');
+        if (document.querySelector('input[type="file"]')) {
+            document.querySelector('input[type="file"]').value = '';
+        }
+    }, []);
+
+    return (
+        <div className="excel-import-container max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-lg">
+            <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-gray-800">📊 Excel題目匯入</h2>
+                {onClose && (
+                    <button
+                        onClick={onClose}
+                        className="text-gray-500 hover:text-gray-700 text-xl"
+                    >
+                        ✕
+                    </button>
                 )}
-              </div>
             </div>
-          )}
 
-          {/* 操作按鈕 */}
-          <div className="flex gap-3">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              關閉
-            </button>
-            
-            {preview.length > 0 && validationErrors.length === 0 && (
-              <button
-                onClick={uploadToDatabase}
-                disabled={uploading}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                {uploading ? '上傳中...' : `上傳 ${preview.length > 10 ? '全部' : preview.length} 題到資料庫`}
-              </button>
+            {/* 文件選擇區域 */}
+            <div className="mb-6">
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                    <input
+                        type="file"
+                        accept=".xlsx,.xls"
+                        onChange={handleFileSelect}
+                        className="hidden"
+                        id="excel-file-input"
+                    />
+                    <label
+                        htmlFor="excel-file-input"
+                        className="cursor-pointer block"
+                    >
+                        <div className="mb-4">
+                            <span className="text-4xl">📁</span>
+                        </div>
+                        <div className="text-lg font-medium text-gray-700 mb-2">
+                            選擇Excel文件
+                        </div>
+                        <div className="text-sm text-gray-500">
+                            支援 .xlsx 和 .xls 格式
+                        </div>
+                    </label>
+                </div>
+
+                {file && (
+                    <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <span className="font-medium">已選擇文件：</span>
+                                <span className="text-blue-600">{file.name}</span>
+                                <span className="text-gray-500 ml-2">
+                                    ({(file.size / 1024).toFixed(1)} KB)
+                                </span>
+                            </div>
+                            <div className="space-x-2">
+                                <button
+                                    onClick={parseExcelFile}
+                                    disabled={parsing}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                                >
+                                    {parsing ? '解析中...' : '解析文件'}
+                                </button>
+                                <button
+                                    onClick={resetState}
+                                    className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+                                >
+                                    重新選擇
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* 錯誤顯示 */}
+            {error && (
+                <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <div className="text-red-700">
+                        <span className="font-medium">❌ 錯誤：</span>
+                        {error}
+                    </div>
+                </div>
             )}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
 
-export default ExcelImport
+            {/* 預覽數據 */}
+            {previewData.length > 0 && (
+                <div className="mb-6">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-xl font-bold text-gray-800">
+                            📋 資料預覽 ({previewData.length} 題)
+                        </h3>
+                        <button
+                            onClick={handleImport}
+                            disabled={importing}
+                            className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
+                        >
+                            {importing ? '匯入中...' : `匯入 ${previewData.length} 題`}
+                        </button>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full border border-gray-300 rounded-lg">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-4 py-2 border text-left">題號</th>
+                                    <th className="px-4 py-2 border text-left">年份</th>
+                                    <th className="px-4 py-2 border text-left">科目</th>
+                                    <th className="px-4 py-2 border text-left">題目</th>
+                                    <th className="px-4 py-2 border text-left">答案</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {previewData.slice(0, 10).map((item, index) => (
+                                    <tr key={index} className="hover:bg-gray-50">
+                                        <td className="px-4 py-2 border">{item.questionNumber}</td>
+                                        <td className="px-4 py-2 border">{item.year}</td>
+                                        <td className="px-4 py-2 border">{item.subCategory}</td>
+                                        <td className="px-4 py-2 border">
+                                            <div className="max-w-md truncate" title={item.question}>
+                                                {item.question}
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-2 border text-center">
+                                            <span className="inline-block w-6 h-6 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+                                                {item.correctAnswer}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                        {previewData.length > 10 && (
+                            <div className="text-center py-2 text-gray-500">
+                                顯示前10題，共{previewData.length}題
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* 匯入結果 */}
+            {importResult && (
+                <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+                    <h3 className="text-lg font-bold text-green-800 mb-3">🎉 匯入完成</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                        <div className="bg-white p-3 rounded">
+                            <div className="text-2xl font-bold text-blue-600">{importResult.total}</div>
+                            <div className="text-sm text-gray-600">總題目</div>
+                        </div>
+                        <div className="bg-white p-3 rounded">
+                            <div className="text-2xl font-bold text-green-600">{importResult.success}</div>
+                            <div className="text-sm text-gray-600">成功</div>
+                        </div>
+                        <div className="bg-white p-3 rounded">
+                            <div className="text-2xl font-bold text-orange-600">{importResult.duplicate || 0}</div>
+                            <div className="text-sm text-gray-600">重複跳過</div>
+                        </div>
+                        <div className="bg-white p-3 rounded">
+                            <div className="text-2xl font-bold text-red-600">{importResult.error}</div>
+                            <div className="text-sm text-gray-600">失敗</div>
+                        </div>
+                    </div>
+                    {importResult.errors && importResult.errors.length > 0 && (
+                        <div className="mt-4">
+                            <h4 className="font-medium text-red-700 mb-2">錯誤詳情：</h4>
+                            <ul className="text-sm text-red-600 space-y-1">
+                                {importResult.errors.slice(0, 5).map((error, index) => (
+                                    <li key={index}>• {error}</li>
+                                ))}
+                                {importResult.errors.length > 5 && (
+                                    <li>... 還有 {importResult.errors.length - 5} 個錯誤</li>
+                                )}
+                            </ul>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* 使用說明 */}
+            <div className="bg-gray-50 p-4 rounded-lg">
+                <h3 className="font-bold text-gray-800 mb-2">📋 Excel格式說明</h3>
+                <div className="text-sm text-gray-600 space-y-1">
+                    <p>• 第一行必須是標題行（欄位名稱）</p>
+                    <p>• 必要欄位：題目、選項A、選項B、選項C、選項D、答案</p>
+                    <p>• 可選欄位：題號、年份、科目、解釋</p>
+                    <p>• 答案格式：A、B、C、D（不區分大小寫）</p>
+                    <p>• 支援的欄位名稱變體：question/題目、option a/選項a、answer/答案等</p>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default ExcelImport;
